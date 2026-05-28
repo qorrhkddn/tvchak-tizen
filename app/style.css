@@ -27,6 +27,7 @@ html, body {
 .row { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
 
 .screen { width: 100%; height: 100%; padding: 36px 48px; overflow: hidden; }
+#screen-home { display: flex; flex-direction: column; }
 
 /* ---- 포커스 ---- */
 .focusable {
@@ -69,7 +70,14 @@ html, body {
 .title-area { margin: 0; font-size: 28px; }
 
 /* ---- 그리드 ---- */
-.content { height: calc(100vh - 130px); overflow-y: auto; padding-right: 8px; }
+.content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 8px 80px;     /* 마지막 행이 잘려보이지 않게 하단 여유 */
+  scroll-padding-top: 12px;
+  scroll-padding-bottom: 80px;
+}
 .grid {
   display: grid;
   grid-template-columns: repeat(6, 1fr);

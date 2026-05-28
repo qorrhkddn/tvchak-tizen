@@ -144,8 +144,22 @@
     focus.current = el;
     if (el) {
       el.classList.add("focused");
-      if (el.scrollIntoView) el.scrollIntoView({ block: "nearest", inline: "nearest" });
+      if (el.scrollIntoView) {
+        // 카드면 가운데로 끌어와 잘리지 않게, 작은 요소(탭 등)는 nearest로
+        var block = el.classList.contains("card") ? "center" : "nearest";
+        el.scrollIntoView({ block: block, inline: "nearest" });
+      }
+      // 거의 끝에 도달하면 다음 페이지 자동 로드
+      maybeAutoLoadMore();
     }
+  }
+
+  function maybeAutoLoadMore() {
+    if (listState.mode !== "cat" || !listState.hasMore || listState.loading) return;
+    var content = document.querySelector("#screen-home .content");
+    if (!content) return;
+    var remaining = content.scrollHeight - (content.scrollTop + content.clientHeight);
+    if (remaining < LOAD_MORE_THRESHOLD_PX) loadCategoryMore();
   }
 
   function move(dx, dy) {
@@ -251,8 +265,19 @@
 
   // ---------- 홈 ----------
   // 기본 탭 = 이어보기 (메인 카테고리에 가끔 선정적 썸네일이 섞여서)
-  var homeState = { tab: "recent", category: "1", catPage: 1 };
+  var homeState = { tab: "recent", category: "1" };
   var pendingClearAt = 0;  // 노란색 키 두 번으로 전체 삭제 확정용
+
+  // 무한 로드 상태 (카테고리 탭 전용)
+  var listState = {
+    mode: null,    // "cat" | null
+    cat: null,
+    page: 1,
+    hasMore: false,
+    loading: false,
+    itemCount: 0,
+  };
+  var LOAD_MORE_THRESHOLD_PX = 600;  // 그리드 끝에서 이만큼 남으면 다음 페이지
 
   function enterHome() {
     show("home", false);
@@ -268,8 +293,9 @@
 
     if (name.indexOf("cat-") === 0) {
       homeState.category = name.split("-")[1];
-      homeState.catPage = 1;
-      loadCategory(homeState.category, homeState.catPage);
+      listState = { mode: "cat", cat: homeState.category, page: 1,
+                    hasMore: false, loading: false, itemCount: 0 };
+      loadCategoryFirst();
     } else if (name === "search") {
       renderSearchTab();
     } else if (name === "recent") {
@@ -285,6 +311,7 @@
     opts = opts || {};
     var grid = document.getElementById("grid");
     grid.innerHTML = "";
+    listState.itemCount = 0;
     document.getElementById("grid-status").textContent = "";
 
     // 탭에 row=0
@@ -296,78 +323,84 @@
       rebuildFocus(screens.home);
       return;
     }
-    items.forEach(function (it, i) {
-      var card = document.createElement("div");
-      card.className = "card focusable";
-      card.dataset.row = String(2 + Math.floor(i / 6));
-      card.dataset.col = String(i % 6);
-      var posterUrl = it.poster_proxy_url || it.poster || "";
-      card.innerHTML =
-        '<div class="card-img-wrap">' +
-          (posterUrl ? '<img src="' + posterUrl + '" loading="lazy" onerror="this.style.display=\'none\'">' : '') +
-        '</div>' +
-        '<div class="card-title">' + escapeHtml(it.title || "") + '</div>';
-      card.addEventListener("click", function () { onClickItem(it); });
-      if (typeof opts.onDelete === "function") {
-        card._deleteHandler = function () { opts.onDelete(it); };
-      }
-      grid.appendChild(card);
-    });
+    items.forEach(function (it) { appendCard(grid, it, onClickItem, opts); });
 
     if (opts.deleteHint) {
       document.getElementById("grid-status").textContent = opts.deleteHint;
     }
-
-    // 카테고리 페이징 컨트롤
-    if (opts.pager) {
-      var pageRow = 2 + Math.ceil(items.length / 6);
-      var pager = document.createElement("div");
-      pager.className = "pager";
-
-      if (opts.pager.page > 1) {
-        var prev = document.createElement("button");
-        prev.className = "btn btn-secondary focusable";
-        prev.textContent = "← 이전 페이지";
-        prev.dataset.row = String(pageRow); prev.dataset.col = "0";
-        prev.addEventListener("click", function () {
-          loadCategory(opts.pager.cat, opts.pager.page - 1);
-        });
-        pager.appendChild(prev);
-      }
-      var label = document.createElement("span");
-      label.className = "muted";
-      label.textContent = " 페이지 " + opts.pager.page + " ";
-      pager.appendChild(label);
-
-      var next = document.createElement("button");
-      next.className = "btn focusable";
-      next.textContent = "다음 페이지 →";
-      next.dataset.row = String(pageRow); next.dataset.col = "1";
-      next.addEventListener("click", function () {
-        loadCategory(opts.pager.cat, opts.pager.page + 1);
-      });
-      pager.appendChild(next);
-
-      grid.parentElement.appendChild(pager);
-      // 다음 렌더 시 제거 위해 보관
-      grid.parentElement.querySelectorAll(".pager").forEach(function (p, idx, all) {
-        if (idx < all.length - 1) p.remove();
-      });
-    } else {
-      grid.parentElement.querySelectorAll(".pager").forEach(function (p) { p.remove(); });
-    }
-
     rebuildFocus(screens.home);
   }
 
-  function loadCategory(cat, page) {
-    homeState.catPage = page;
-    document.getElementById("grid-status").textContent = "불러오는 중... (페이지 " + page + ")";
-    apiGet("/api/mainpage?cat=" + cat + "&page=" + page).then(function (j) {
-      renderGrid(j.items || [], openDetail, { pager: { cat: cat, page: page } });
-    }).catch(function (e) {
-      document.getElementById("grid-status").textContent = "실패: " + e.message;
-    });
+  function appendToGrid(items, onClickItem, opts) {
+    opts = opts || {};
+    var grid = document.getElementById("grid");
+    items.forEach(function (it) { appendCard(grid, it, onClickItem, opts); });
+    rebuildFocus(screens.home);  // 새 카드만 추가, 현재 포커스는 유지됨
+  }
+
+  function appendCard(grid, it, onClickItem, opts) {
+    var i = listState.itemCount;
+    var card = document.createElement("div");
+    card.className = "card focusable";
+    card.dataset.row = String(2 + Math.floor(i / 6));
+    card.dataset.col = String(i % 6);
+    var posterUrl = it.poster_proxy_url || it.poster || "";
+    card.innerHTML =
+      '<div class="card-img-wrap">' +
+        (posterUrl ? '<img src="' + posterUrl + '" loading="lazy" onerror="this.style.display=\'none\'">' : '') +
+      '</div>' +
+      '<div class="card-title">' + escapeHtml(it.title || "") + '</div>';
+    card.addEventListener("click", function () { onClickItem(it); });
+    if (opts && typeof opts.onDelete === "function") {
+      card._deleteHandler = function () { opts.onDelete(it); };
+    }
+    grid.appendChild(card);
+    listState.itemCount = i + 1;
+  }
+
+  function loadCategoryFirst() {
+    document.getElementById("grid-status").textContent = "불러오는 중...";
+    document.getElementById("grid").innerHTML = "";
+    listState.itemCount = 0;
+    listState.loading = true;
+    apiGet("/api/mainpage?cat=" + listState.cat + "&page=" + listState.page)
+      .then(function (j) {
+        listState.loading = false;
+        var items = j.items || [];
+        listState.hasMore = items.length >= 12;  // 한 페이지 가득 차면 더 있을 거라 가정
+        renderGrid(items, openDetail);
+      })
+      .catch(function (e) {
+        listState.loading = false;
+        document.getElementById("grid-status").textContent = "실패: " + e.message;
+      });
+  }
+
+  function loadCategoryMore() {
+    if (listState.mode !== "cat" || !listState.hasMore || listState.loading) return;
+    listState.loading = true;
+    listState.page += 1;
+    document.getElementById("grid-status").textContent =
+      "더 불러오는 중... (페이지 " + listState.page + ")";
+    apiGet("/api/mainpage?cat=" + listState.cat + "&page=" + listState.page)
+      .then(function (j) {
+        listState.loading = false;
+        var items = j.items || [];
+        if (!items.length) {
+          listState.hasMore = false;
+          document.getElementById("grid-status").textContent = "마지막 페이지입니다.";
+          return;
+        }
+        if (items.length < 12) listState.hasMore = false;
+        appendToGrid(items, openDetail);
+        document.getElementById("grid-status").textContent =
+          listState.hasMore ? "" : "마지막 페이지입니다.";
+      })
+      .catch(function (e) {
+        listState.loading = false;
+        listState.page -= 1;  // 실패 시 페이지 롤백
+        document.getElementById("grid-status").textContent = "추가 로드 실패: " + e.message;
+      });
   }
 
   function renderSearchTab() {
@@ -780,6 +813,16 @@
 
   function onBack() {
     if (currentScreen === "settings" && !nasUrl()) { return; }  // 첫 진입 시 강제 머무름
+
+    // 홈에서 카드(또는 검색 입력)에 포커스가 있으면 상단 탭으로 먼저 올라감.
+    // 탭에서 한 번 더 Return을 누르면 그 때 화면 이동.
+    if (currentScreen === "home" && focus.current) {
+      var cur = focus.items.find(function (i) { return i.el === focus.current; });
+      if (cur && cur.row > 0) {
+        var activeTab = document.querySelector("#tabs .tab.active");
+        if (activeTab) { setFocus(activeTab); return; }
+      }
+    }
     goBack();
   }
 

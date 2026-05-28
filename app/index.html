@@ -14,10 +14,12 @@
       <p class="muted">시놀로지 등에서 돌고 있는 TVChak 프록시 서버의 주소를 입력하세요.</p>
       <p class="muted">예: <code>http://192.168.1.230:7777</code></p>
       <div class="settings-input-row">
-        <div id="nas-input" class="text-input" data-value=""></div>
+        <input id="nas-input" class="text-input focusable" type="url"
+               autocomplete="off" autocapitalize="off" autocorrect="off"
+               spellcheck="false"
+               placeholder="http://192.168.1.230:7777">
       </div>
-      <div class="hint">방향키: 키 이동 · OK: 입력 · 단축키 → 적색: 백스페이스 · 황색: 전체삭제 · 녹색: 저장</div>
-      <div id="virtual-keyboard"></div>
+      <div class="hint">박스에 포커스 → OK 누르면 TV 키보드가 뜹니다. 입력 후 Return으로 닫고 ↓로 저장 버튼.</div>
       <div class="settings-actions">
         <button class="btn focusable" data-action="save-nas">저장하고 시작</button>
         <button class="btn btn-secondary focusable" data-action="refresh-domain">시드 도메인 자동 탐색</button>
@@ -46,11 +48,12 @@
       <!-- 검색 입력 영역 (검색 탭 진입 시 노출) -->
       <div id="search-area" class="search-area hidden">
         <div class="search-input-row">
-          <div id="search-input" class="text-input" data-value=""></div>
+          <input id="search-input" class="text-input focusable" type="search"
+                 autocomplete="off" autocapitalize="off" autocorrect="off"
+                 placeholder="검색어 (예: 취사병)">
           <button class="btn focusable" data-action="search-go">검색</button>
         </div>
-        <div class="hint">방향키: 키 이동 · OK: 입력 · 단축키 → 적색: 백스페이스 · 황색: 전체삭제 · 녹색: 검색</div>
-        <div id="search-keyboard"></div>
+        <div class="hint">박스에 포커스 → OK로 TV 키보드 → 입력 후 Return으로 닫고 ↓로 검색 버튼.</div>
       </div>
 
       <main class="content">

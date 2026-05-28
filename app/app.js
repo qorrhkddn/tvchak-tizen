@@ -98,17 +98,33 @@
     current: null,
   };
 
+  function isEffectivelyHidden(el) {
+    var node = el;
+    while (node && node !== document) {
+      if (node.classList && node.classList.contains("hidden")) return true;
+      if (node.style && node.style.display === "none") return true;
+      node = node.parentElement;
+    }
+    // offsetParent 가 null이면 화면에서 렌더 안됨 (display:none 부모 등)
+    if (el.offsetParent === null && el.tagName !== "BODY") return true;
+    return false;
+  }
+
   function rebuildFocus(container) {
     focus.items = [];
     focus.rowMap = {};
-    var nodes = container.querySelectorAll(".focusable:not(.hidden)");
+    var nodes = container.querySelectorAll(".focusable");
     nodes.forEach(function (el) {
+      if (isEffectivelyHidden(el)) return;
       var row = parseInt(el.dataset.row || "0", 10);
       var col = parseInt(el.dataset.col || "0", 10);
       focus.items.push({ el: el, row: row, col: col });
       (focus.rowMap[row] = focus.rowMap[row] || []).push(col);
     });
-    // 기본 포커스
+    // 기본 포커스 — 이미 포커스된 게 여전히 유효하면 유지
+    if (focus.current && focus.items.some(function (i) { return i.el === focus.current; })) {
+      return;
+    }
     var first = focus.items[0];
     if (first) setFocus(first.el);
     else focus.current = null;
@@ -152,97 +168,36 @@
       });
   }
 
-  // ---------- 가상 키보드 ----------
-  // 행마다 첫 글자 객체로 "special" 표시 가능: {ch: "⌫", act: "backspace", wide: true}
-  var KBD_ROWS_URL = [
-    ["1","2","3","4","5","6","7","8","9","0"],
-    ["q","w","e","r","t","y","u","i","o","p"],
-    ["a","s","d","f","g","h","j","k","l","-"],
-    ["z","x","c","v","b","n","m",".","_","@"],
-    [
-      { ch: ":", act: "char" },
-      { ch: "/", act: "char" },
-      { ch: ".", act: "char" },
-      { ch: "http://", act: "string", wide: true },
-      { ch: "https://", act: "string", wide: true },
-      { ch: "공백", act: "space", wide: true },
-      { ch: "⌫", act: "backspace", wide: true },
-      { ch: "전체삭제", act: "clear", wide: true }
-    ]
-  ];
-  var KBD_ROWS_SEARCH = [
-    ["1","2","3","4","5","6","7","8","9","0"],
-    ["ㅁ","ㅂ","ㅈ","ㄷ","ㄱ","ㅅ","ㅛ","ㅕ","ㅑ","ㅐ"],
-    ["ㄴ","ㅇ","ㄹ","ㅎ","ㅗ","ㅓ","ㅏ","ㅣ","ㅡ","ㅔ"],
-    ["ㅋ","ㅌ","ㅊ","ㅍ","ㅠ","ㅜ","ㅡ",".",",","?"],
-    ["q","w","e","r","t","y","u","i","o","p"],
-    ["a","s","d","f","g","h","j","k","l","-"],
-    ["z","x","c","v","b","n","m"," ","-","_"],
-    [
-      { ch: "공백", act: "space", wide: true },
-      { ch: "⌫", act: "backspace", wide: true },
-      { ch: "전체삭제", act: "clear", wide: true },
-      { ch: "검색", act: "submit-search", wide: true }
-    ]
-  ];
-
-  function buildKeyboard(containerId, rows, opts) {
-    var container = document.getElementById(containerId);
-    container.innerHTML = "";
-    rows.forEach(function (row, ri) {
-      var rowEl = document.createElement("div");
-      rowEl.className = "kbd-row";
-      row.forEach(function (item, ci) {
-        var spec = (typeof item === "string") ? { ch: item, act: "char" } : item;
-        var key = document.createElement("div");
-        key.className = "kbd-key focusable" + (spec.wide ? " wide" : "");
-        key.textContent = spec.ch;
-        key.dataset.char = spec.ch;
-        key.dataset.act = spec.act || "char";
-        key.dataset.row = String(opts.rowOffset + ri);
-        key.dataset.col = String(ci);
-        rowEl.appendChild(key);
-      });
-      container.appendChild(rowEl);
-    });
-  }
-
-  // ---------- 텍스트 입력(가짜 input) ----------
-  function inputAppend(elId, ch) {
-    var el = document.getElementById(elId);
-    el.dataset.value = (el.dataset.value || "") + ch;
-    el.classList.remove("empty");
-  }
-  function inputBackspace(elId) {
-    var el = document.getElementById(elId);
-    var v = el.dataset.value || "";
-    el.dataset.value = v.slice(0, -1);
-    if (!el.dataset.value) el.classList.add("empty");
-  }
-  function inputClear(elId) {
-    var el = document.getElementById(elId);
-    el.dataset.value = "";
-    el.classList.add("empty");
-  }
+  // ---------- 텍스트 입력 (Tizen native IME) ----------
+  // 진짜 <input> 요소를 쓰므로 포커스 시 Tizen OSD 키보드가 자동으로 뜬다.
   function inputValue(elId) {
-    return document.getElementById(elId).dataset.value || "";
+    return (document.getElementById(elId).value || "").trim();
+  }
+  function inputSet(elId, v) {
+    document.getElementById(elId).value = v || "";
+  }
+  function inputFocus(elId) {
+    var el = document.getElementById(elId);
+    el.focus();
+    try { el.select(); } catch (_) {}
+  }
+  function inputIsFocused() {
+    var a = document.activeElement;
+    return a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA");
   }
 
   // ---------- 설정 화면 ----------
   function renderSettings() {
     var nasInput = document.getElementById("nas-input");
-    nasInput.dataset.value = nasUrl() || "http://192.168.1.230:7777";
-    if (!nasUrl()) nasInput.classList.remove("empty");
-    nasInput.dataset.placeholder = "http://192.168.1.230:7777";
+    nasInput.value = nasUrl() || "http://192.168.1.230:7777";
+    nasInput.dataset.row = "0"; nasInput.dataset.col = "0";
 
-    buildKeyboard("virtual-keyboard", KBD_ROWS_URL, { rowOffset: 2 });
-
-    // 행 0: nas-input(포커스 불가), 행 2~6: 키보드, 행 7: 액션 버튼
     var actions = document.querySelectorAll("#screen-settings .settings-actions .focusable");
-    actions[0].dataset.row = "7"; actions[0].dataset.col = "0";
-    actions[1].dataset.row = "7"; actions[1].dataset.col = "1";
+    actions[0].dataset.row = "1"; actions[0].dataset.col = "0";
+    actions[1].dataset.row = "1"; actions[1].dataset.col = "1";
 
     document.getElementById("settings-status").textContent = "";
+    focus.current = null;
     rebuildFocus(screens.settings);
   }
 
@@ -286,10 +241,11 @@
   }
 
   // ---------- 홈 ----------
-  var homeState = { tab: "cat-1", category: "1", searchPage: false };
+  // 기본 탭 = 즐겨찾기 (메인 카테고리에 가끔 선정적 썸네일이 섞여서)
+  var homeState = { tab: "fav", category: "1", catPage: 1 };
 
   function enterHome() {
-    show("home");
+    show("home", false);
     selectTab(homeState.tab);
   }
 
@@ -302,7 +258,8 @@
 
     if (name.indexOf("cat-") === 0) {
       homeState.category = name.split("-")[1];
-      loadCategory(homeState.category, 1);
+      homeState.catPage = 1;
+      loadCategory(homeState.category, homeState.catPage);
     } else if (name === "search") {
       renderSearchTab();
     } else if (name === "recent") {
@@ -314,12 +271,20 @@
     }
   }
 
-  function renderGrid(items, onClickItem) {
+  function renderGrid(items, onClickItem, opts) {
+    opts = opts || {};
     var grid = document.getElementById("grid");
     grid.innerHTML = "";
     document.getElementById("grid-status").textContent = "";
+
+    // 탭에 row=0
+    var tabs = document.querySelectorAll("#tabs .focusable");
+    tabs.forEach(function (t, i) { t.dataset.row = "0"; t.dataset.col = String(i); });
+
     if (!items.length) {
-      document.getElementById("grid-status").textContent = "결과가 없습니다.";
+      document.getElementById("grid-status").textContent = opts.emptyHint || "결과가 없습니다.";
+      rebuildFocus(screens.home);
+      return;
     }
     items.forEach(function (it, i) {
       var card = document.createElement("div");
@@ -335,16 +300,54 @@
       card.addEventListener("click", function () { onClickItem(it); });
       grid.appendChild(card);
     });
-    // 탭에 row=0, 검색입력 row=1
-    var tabs = document.querySelectorAll("#tabs .focusable");
-    tabs.forEach(function (t, i) { t.dataset.row = "0"; t.dataset.col = String(i); });
+
+    // 카테고리 페이징 컨트롤
+    if (opts.pager) {
+      var pageRow = 2 + Math.ceil(items.length / 6);
+      var pager = document.createElement("div");
+      pager.className = "pager";
+
+      if (opts.pager.page > 1) {
+        var prev = document.createElement("button");
+        prev.className = "btn btn-secondary focusable";
+        prev.textContent = "← 이전 페이지";
+        prev.dataset.row = String(pageRow); prev.dataset.col = "0";
+        prev.addEventListener("click", function () {
+          loadCategory(opts.pager.cat, opts.pager.page - 1);
+        });
+        pager.appendChild(prev);
+      }
+      var label = document.createElement("span");
+      label.className = "muted";
+      label.textContent = " 페이지 " + opts.pager.page + " ";
+      pager.appendChild(label);
+
+      var next = document.createElement("button");
+      next.className = "btn focusable";
+      next.textContent = "다음 페이지 →";
+      next.dataset.row = String(pageRow); next.dataset.col = "1";
+      next.addEventListener("click", function () {
+        loadCategory(opts.pager.cat, opts.pager.page + 1);
+      });
+      pager.appendChild(next);
+
+      grid.parentElement.appendChild(pager);
+      // 다음 렌더 시 제거 위해 보관
+      grid.parentElement.querySelectorAll(".pager").forEach(function (p, idx, all) {
+        if (idx < all.length - 1) p.remove();
+      });
+    } else {
+      grid.parentElement.querySelectorAll(".pager").forEach(function (p) { p.remove(); });
+    }
+
     rebuildFocus(screens.home);
   }
 
   function loadCategory(cat, page) {
-    document.getElementById("grid-status").textContent = "불러오는 중...";
+    homeState.catPage = page;
+    document.getElementById("grid-status").textContent = "불러오는 중... (페이지 " + page + ")";
     apiGet("/api/mainpage?cat=" + cat + "&page=" + page).then(function (j) {
-      renderGrid(j.items || [], openDetail);
+      renderGrid(j.items || [], openDetail, { pager: { cat: cat, page: page } });
     }).catch(function (e) {
       document.getElementById("grid-status").textContent = "실패: " + e.message;
     });
@@ -352,12 +355,9 @@
 
   function renderSearchTab() {
     var input = document.getElementById("search-input");
-    if (!input.dataset.value) input.classList.add("empty");
-    input.dataset.placeholder = "검색어 입력 (예: 취사병)";
-    buildKeyboard("search-keyboard", KBD_ROWS_SEARCH, { rowOffset: 2 });
-    // 검색 버튼은 row=1
+    input.dataset.row = "1"; input.dataset.col = "0";
     var goBtn = document.querySelector('[data-action="search-go"]');
-    goBtn.dataset.row = "1"; goBtn.dataset.col = "10";
+    goBtn.dataset.row = "1"; goBtn.dataset.col = "1";
     // 그리드 초기화
     document.getElementById("grid").innerHTML = "";
     document.getElementById("grid-status").textContent = "검색어를 입력하세요.";
@@ -383,7 +383,7 @@
     renderGrid(mapped, function (it) {
       var hit = items.find(function (h) { return h.detail_url === it.url; });
       openDetail(it, hit);
-    });
+    }, { emptyHint: "최근 시청한 항목이 없습니다. 다른 탭에서 컨텐츠를 골라 재생해보세요." });
   }
 
   function renderFavTab() {
@@ -391,7 +391,9 @@
     var mapped = favs.map(function (f) {
       return { title: f.title, url: f.detail_url, poster_proxy_url: f.poster_proxy_url, poster: f.poster };
     });
-    renderGrid(mapped, openDetail);
+    renderGrid(mapped, openDetail, {
+      emptyHint: "즐겨찾기에 추가된 항목이 없습니다. 상세 화면에서 '즐겨찾기 추가'를 눌러주세요."
+    });
   }
 
   // ---------- 상세 ----------
@@ -637,28 +639,44 @@
   function clickFocusable() {
     if (!focus.current) return;
     var el = focus.current;
-    if (el.classList.contains("kbd-key")) {
-      handleKeyboardKey(el);
+    // input은 클릭 → Tizen IME가 자동으로 뜸
+    if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") {
+      inputFocus(el.id);
       return;
     }
     el.click();
   }
 
-  function handleKeyboardKey(el) {
-    var act = el.dataset.act || "char";
-    var ch = el.dataset.char;
-    var targetInputId = (currentScreen === "settings") ? "nas-input" : "search-input";
-    if (act === "char") { inputAppend(targetInputId, ch); return; }
-    if (act === "string") { inputAppend(targetInputId, ch); return; }
-    if (act === "space") { inputAppend(targetInputId, " "); return; }
-    if (act === "backspace") { inputBackspace(targetInputId); return; }
-    if (act === "clear") { inputClear(targetInputId); return; }
-    if (act === "submit-search") { doSearch(); return; }
-  }
-
   // ---------- 키 이벤트 ----------
   document.addEventListener("keydown", function (e) {
     var k = e.keyCode;
+    var active = document.activeElement;
+    var inInput = active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA");
+
+    // input 포커스 상태에선 IME에 키를 양보. 단 일부는 우리가 처리.
+    if (inInput) {
+      if (k === 10009 || k === 27) {     // Return/Esc: IME 닫고 input 벗어남
+        active.blur();
+        e.preventDefault();
+        return;
+      }
+      if (k === 13) {                    // Enter: 제출
+        active.blur();
+        if (currentScreen === "settings") saveNasAndContinue();
+        else if (currentScreen === "home" && homeState.tab === "search") doSearch();
+        e.preventDefault();
+        return;
+      }
+      if (k === 38 || k === 40) {        // 위/아래: input 떠나서 다음 포커스로
+        active.blur();
+        onArrow(0, k === 40 ? 1 : -1);
+        e.preventDefault();
+        return;
+      }
+      // 좌우/글자/백스페이스 등은 native에 양보 (preventDefault X)
+      return;
+    }
+
     // Tizen 리모컨 키코드
     // 37/38/39/40: 방향, 13: Enter, 10009/8: Back, 415: Play, 19: Pause, 10252: PlayPause
     // 413: Stop, 417: FF, 412: Rewind, 403/404/405/406: Red/Green/Yellow/Blue
@@ -710,16 +728,14 @@
     showOverlayBriefly();
   }
   function onColor(color) {
-    // 키보드에 모든 키가 들어있으므로 색상은 자주 쓰는 액션만 단축키 역할.
+    // 빠른 액션 단축키
     if (currentScreen === "settings") {
-      if (color === "red") inputBackspace("nas-input");
-      if (color === "yellow") inputClear("nas-input");
+      if (color === "yellow") inputSet("nas-input", "");
       if (color === "green") saveNasAndContinue();
       return;
     }
     if (currentScreen === "home" && homeState.tab === "search") {
-      if (color === "red") inputBackspace("search-input");
-      if (color === "yellow") inputClear("search-input");
+      if (color === "yellow") inputSet("search-input", "");
       if (color === "green") doSearch();
       return;
     }
@@ -746,7 +762,7 @@
   // ---------- 시작 ----------
   registerKeys();
   if (nasUrl()) {
-    show("home", false);
+    enterHome();
   } else {
     show("settings", false);
   }

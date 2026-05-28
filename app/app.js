@@ -919,8 +919,7 @@
     if (inInput) {
       if (k === 10009 || k === 27) {     // Return/Esc: IME 닫고 한 번에 뒤로까지
         active.blur();
-        e.preventDefault();
-        onBack();
+        if (onBack()) e.preventDefault();
         return;
       }
       if (k === 13) {                    // Enter: 제출
@@ -948,7 +947,10 @@
     if (k === 38) { onArrow(0, -1); e.preventDefault(); return; }
     if (k === 40) { onArrow(0, 1); e.preventDefault(); return; }
     if (k === 13) { onOk(); e.preventDefault(); return; }
-    if (k === 10009 || k === 8 || k === 27) { onBack(); e.preventDefault(); return; }
+    if (k === 10009 || k === 8 || k === 27) {
+      if (onBack()) e.preventDefault();
+      return;
+    }
     if (k === 415 || k === 19 || k === 10252) { onPlayPause(); e.preventDefault(); return; }
     if (k === 413) { onStop(); e.preventDefault(); return; }
     if (k === 417) { onSeek(10); e.preventDefault(); return; }
@@ -973,19 +975,28 @@
     clickFocusable();
   }
 
+  // 반환값: true면 우리가 처리했으니 default 동작(앱 종료/TizenBrew 복귀) 차단,
+  //        false면 default 흘려보내서 TizenBrew 메인 메뉴로 나가게 한다.
   function onBack() {
-    if (currentScreen === "settings" && !nasUrl()) { return; }  // 첫 진입 시 강제 머무름
+    // NAS 주소 미설정 상태에선 설정에 머물게 함
+    if (currentScreen === "settings" && !nasUrl()) { return true; }
 
-    // 홈에서 카드(또는 검색 입력)에 포커스가 있으면 상단 탭으로 먼저 올라감.
-    // 탭에서 한 번 더 Return을 누르면 그 때 화면 이동.
-    if (currentScreen === "home" && focus.current) {
-      var cur = focus.items.find(function (i) { return i.el === focus.current; });
-      if (cur && cur.row > 0) {
-        var activeTab = document.querySelector("#tabs .tab.active");
-        if (activeTab) { setFocus(activeTab); return; }
+    if (currentScreen === "home") {
+      // 카드/검색입력 등 탭 아래에 포커스가 있으면 상단 탭으로 올라옴
+      if (focus.current) {
+        var cur = focus.items.find(function (i) { return i.el === focus.current; });
+        if (cur && cur.row > 0) {
+          var activeTab = document.querySelector("#tabs .tab.active");
+          if (activeTab) { setFocus(activeTab); return true; }
+        }
       }
+      // 이미 탭에 포커스가 있는 상태 → default 동작(메인 메뉴로 나가기)에 양보
+      return false;
     }
+
+    // detail / player / settings(NAS 설정 완료) → 한 단계 뒤로
     goBack();
+    return true;
   }
 
   function onPlayPause() {

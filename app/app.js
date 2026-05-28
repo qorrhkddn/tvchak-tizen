@@ -1059,15 +1059,23 @@
 
     if (_exitStep === 0) {
       _exitStep = 1;
+      // hide() + 합성 back 키 dispatch — Tizen webview의 native back 핸들러가
+      // isTrusted=false를 무시하고 처리해주길 기대. 가능성은 낮지만 시도 비용 0.
       try {
         if (typeof tizen !== "undefined" && tizen.application
             && tizen.application.getCurrentApplication) {
           var app = tizen.application.getCurrentApplication();
-          if (typeof app.hide === "function") { app.hide(); return; }
+          if (typeof app.hide === "function") app.hide();
         }
       } catch (_) {}
-      // tizen 자체가 없는 환경이면 곧장 step 1로 진행
-      _exitStep = 1;
+      try {
+        var ev = new KeyboardEvent("keydown", {
+          keyCode: 10009, which: 10009, bubbles: true, cancelable: true
+        });
+        ev._synthetic = true;  // 우리 핸들러가 무한 루프 안 돌게 marker
+        window.dispatchEvent(ev);
+      } catch (_) {}
+      return;
     }
     if (_exitStep === 1) {
       _exitStep = 2;
@@ -1105,6 +1113,8 @@
     // false면 default(Tizen 메뉴로) 양보
   });
   document.addEventListener("keydown", function (e) {
+    // tryExitChain이 dispatch한 합성 이벤트는 무시 — native handler에게만 가도록
+    if (e._synthetic) return;
     var k = e.keyCode;
     var active = document.activeElement;
     var inInput = active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA");

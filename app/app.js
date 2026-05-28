@@ -126,8 +126,12 @@
     if (dirty) STORE.set("tvchak.favorites", favs);
   }
 
-  // 카드 img element 채우기. 캐시 있으면 즉시, 없으면 원본 로드 후 백그라운드 캐시.
-  function setCardImage(imgEl, cacheKey, url) {
+  // 카드 img element 채우기.
+  // 1) 캐시 있으면 즉시 표시.
+  // 2) 없으면 NAS 원본 URL을 표시하면서 동시에 백엔드 /api/thumb에 요청 →
+  //    JSON으로 받은 base64 dataURI를 localStorage에 저장.
+  //    (client-side canvas/CORS 변수 제거)
+  function setCardImage(imgEl, cacheKey, displayUrl, originalUrl) {
     if (cacheKey) {
       var cached = cachedImage(cacheKey);
       if (cached) {
@@ -135,24 +139,23 @@
         return;
       }
     }
-    if (!url) return;
-    imgEl.src = url;
+    if (displayUrl) imgEl.src = displayUrl;
     if (!cacheKey) return;
-    var probe = new Image();
-    probe.crossOrigin = "anonymous";
-    probe.onload = function () {
-      try {
-        var canvas = document.createElement("canvas");
-        var ratio = probe.naturalHeight / probe.naturalWidth;
-        canvas.width = IMG_CACHE_W;
-        canvas.height = Math.round(IMG_CACHE_W * ratio);
-        var ctx = canvas.getContext("2d");
-        ctx.drawImage(probe, 0, 0, canvas.width, canvas.height);
-        rememberImage(cacheKey, canvas.toDataURL("image/jpeg", IMG_CACHE_QUALITY));
-      } catch (_) { /* CORS 등으로 tainted면 무시 */ }
-    };
-    probe.onerror = function () { /* 캐시 못 함. UI에는 영향 없음 */ };
-    probe.src = url;
+
+    // 백엔드 /api/thumb 호출 (원본 URL이 있으면 그것, 없으면 그냥 NAS 표시 URL을 fallback)
+    var base = nasUrl();
+    if (!base) return;
+    var thumbSrc = originalUrl || displayUrl;
+    if (!thumbSrc) return;
+    var thumbUrl = base.replace(/\/$/, "") + "/api/thumb?u=" + encodeURIComponent(thumbSrc);
+    if (window.fetch) {
+      fetch(thumbUrl).then(function (r) {
+        if (!r.ok) throw new Error("thumb " + r.status);
+        return r.json();
+      }).then(function (j) {
+        if (j && j.data_uri) rememberImage(cacheKey, j.data_uri);
+      }).catch(function () { /* 캐시 못 했음. 다음에 다시 시도 */ });
+    }
   }
 
   // 응답에 박힌 NAS prefix를 제거해서 NAS 주소 바뀌어도 깨지지 않게.
@@ -548,7 +551,8 @@
       img.loading = "lazy";
       img.onerror = function () { this.style.display = "none"; };
       imgWrap.appendChild(img);
-      setCardImage(img, cacheKey, posterUrl);
+      // 원본 URL(it.poster)을 함께 전달 — /api/thumb이 referer 박아서 받아야 하므로
+      setCardImage(img, cacheKey, posterUrl, it.poster);
     }
     card.appendChild(imgWrap);
     // 카드를 그릴 때마다 history/favorites의 path도 카드 path로 정정해둠 (v0.5.0 잘못된 path 자동 마이그레이션)
@@ -719,7 +723,7 @@
     document.getElementById("detail-title").textContent = item.title || "";
     var posterEl = document.getElementById("detail-poster");
     var detailCacheKey = stripNasPrefix(item.poster_proxy_url || item.poster || "");
-    setCardImage(posterEl, detailCacheKey, item.poster_proxy_url || item.poster || "");
+    setCardImage(posterEl, detailCacheKey, item.poster_proxy_url || item.poster || "", item.poster);
     document.getElementById("detail-plot").textContent = "불러오는 중...";
     document.getElementById("episode-list").innerHTML = "";
     document.getElementById("detail-resume-info").textContent = "";
@@ -740,7 +744,7 @@
       // 상세 응답의 poster가 카드와 다른 경우에만 갱신
       if (j.poster_proxy_url && j.poster_proxy_url !== item.poster_proxy_url) {
         var posterEl2 = document.getElementById("detail-poster");
-        setCardImage(posterEl2, stripNasPrefix(j.poster_proxy_url), j.poster_proxy_url);
+        setCardImage(posterEl2, stripNasPrefix(j.poster_proxy_url), j.poster_proxy_url, j.poster);
       }
       renderEpisodes(j.episodes || []);
       updateFavButton();

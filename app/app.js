@@ -914,21 +914,14 @@
     el.click();
   }
 
-  // ---------- 앱을 백그라운드로 (서스펜드) ----------
-  // exit는 webview JS 상태를 통째로 날려서 재진입 시 처음부터 시작하게 만든다.
-  // 가능하면 Tizen Application.hide()로 백그라운드 전환 — 메모리 유지된 채
-  // 잠시 나갔다가 다시 들어오면 같은 화면으로 돌아온다.
-  function suspendApp() {
+  // ---------- TizenBrew 메인 메뉴로 돌아가기 ----------
+  // TizenBrew는 같은 webview 안에서 location.href로 모듈 페이지를 띄운다.
+  // 따라서 history.back()이 우리 진입 직전 페이지(TizenBrew 메뉴)로 데려간다.
+  // tizen.application.exit/hide는 외부 origin 모듈에서는 사실상 no-op이다
+  // (Jellyfin-Tizen의 tizen-adapter.js에 "cannot do anything about it"로 주석되어 있음).
+  function backToTizenBrew() {
     try {
-      if (typeof tizen !== "undefined"
-          && tizen.application
-          && tizen.application.getCurrentApplication) {
-        var app = tizen.application.getCurrentApplication();
-        if (typeof app.hide === "function") {
-          app.hide();
-          return true;
-        }
-      }
+      if (history.length > 1) { history.back(); return true; }
     } catch (_) {}
     return false;
   }
@@ -1033,9 +1026,9 @@
           if (activeTab) { setFocus(activeTab); return true; }
         }
       }
-      // 탭에 포커스 있음 → 백그라운드로 보냄(메모리 유지). hide()를 지원하는
-      // 환경에서는 다음 진입 시 같은 화면으로 복귀. 지원 안 하면 default에 양보.
-      return suspendApp();
+      // 탭에 포커스 있음 → TizenBrew 메뉴로 복귀(history.back).
+      // 실패하면 default 동작에 양보.
+      return backToTizenBrew();
     }
 
     // detail / player / settings(NAS 설정 완료) → 한 단계 뒤로

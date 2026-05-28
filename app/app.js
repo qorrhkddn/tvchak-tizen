@@ -42,6 +42,15 @@
     NAS: "tvchak.nasUrl",
     HISTORY: "tvchak.history",
     FAVORITES: "tvchak.favorites",
+    FIT_MODE: "tvchak.fitMode",
+  };
+
+  var FIT_MODES = ["contain", "cover", "fill", "none"];
+  var FIT_NAMES = {
+    contain: "맞춤(기본)",
+    cover: "꽉 채움(잘림)",
+    fill: "왜곡 채움",
+    none: "원본 크기"
   };
 
   function nasUrl() { return STORE.get(KEYS.NAS, ""); }
@@ -241,8 +250,9 @@
   }
 
   // ---------- 홈 ----------
-  // 기본 탭 = 즐겨찾기 (메인 카테고리에 가끔 선정적 썸네일이 섞여서)
-  var homeState = { tab: "fav", category: "1", catPage: 1 };
+  // 기본 탭 = 이어보기 (메인 카테고리에 가끔 선정적 썸네일이 섞여서)
+  var homeState = { tab: "recent", category: "1", catPage: 1 };
+  var pendingClearAt = 0;  // 노란색 키 두 번으로 전체 삭제 확정용
 
   function enterHome() {
     show("home", false);
@@ -298,8 +308,15 @@
         '</div>' +
         '<div class="card-title">' + escapeHtml(it.title || "") + '</div>';
       card.addEventListener("click", function () { onClickItem(it); });
+      if (typeof opts.onDelete === "function") {
+        card._deleteHandler = function () { opts.onDelete(it); };
+      }
       grid.appendChild(card);
     });
+
+    if (opts.deleteHint) {
+      document.getElementById("grid-status").textContent = opts.deleteHint;
+    }
 
     // 카테고리 페이징 컨트롤
     if (opts.pager) {
@@ -383,7 +400,15 @@
     renderGrid(mapped, function (it) {
       var hit = items.find(function (h) { return h.detail_url === it.url; });
       openDetail(it, hit);
-    }, { emptyHint: "최근 시청한 항목이 없습니다. 다른 탭에서 컨텐츠를 골라 재생해보세요." });
+    }, {
+      emptyHint: "최근 시청한 항목이 없습니다. 다른 탭에서 컨텐츠를 골라 재생해보세요.",
+      deleteHint: "빨강 키: 선택 항목 삭제 · 노랑 키 두 번: 전체 삭제",
+      onDelete: function (it) {
+        removeHistory(it.url);
+        toast("삭제됨", "ok");
+        renderRecentTab();
+      }
+    });
   }
 
   function renderFavTab() {
@@ -392,8 +417,32 @@
       return { title: f.title, url: f.detail_url, poster_proxy_url: f.poster_proxy_url, poster: f.poster };
     });
     renderGrid(mapped, openDetail, {
-      emptyHint: "즐겨찾기에 추가된 항목이 없습니다. 상세 화면에서 '즐겨찾기 추가'를 눌러주세요."
+      emptyHint: "즐겨찾기에 추가된 항목이 없습니다. 상세 화면에서 '즐겨찾기 추가'를 눌러주세요.",
+      deleteHint: "빨강 키: 선택 항목 삭제 · 노랑 키 두 번: 전체 삭제",
+      onDelete: function (it) {
+        removeFavorite(it.url);
+        toast("즐겨찾기 해제", "ok");
+        renderFavTab();
+      }
     });
+  }
+
+  function removeHistory(detailUrl) {
+    var h = STORE.get(KEYS.HISTORY, []);
+    STORE.set(KEYS.HISTORY, h.filter(function (x) { return x.detail_url !== detailUrl; }));
+  }
+  function removeFavorite(detailUrl) {
+    var f = STORE.get(KEYS.FAVORITES, []);
+    STORE.set(KEYS.FAVORITES, f.filter(function (x) { return x.detail_url !== detailUrl; }));
+  }
+  function clearCurrentTab() {
+    if (homeState.tab === "recent") {
+      STORE.set(KEYS.HISTORY, []);
+      selectTab("recent");
+    } else if (homeState.tab === "fav") {
+      STORE.set(KEYS.FAVORITES, []);
+      selectTab("fav");
+    }
   }
 
   // ---------- 상세 ----------
@@ -503,12 +552,31 @@
     saveTimer: null,
   };
 
+  function applyFitMode() {
+    var mode = STORE.get(KEYS.FIT_MODE, "contain");
+    if (FIT_MODES.indexOf(mode) === -1) mode = "contain";
+    player.video.className = "fit-" + mode;
+    var info = document.getElementById("player-fit-info");
+    if (info) info.textContent = "화면: " + FIT_NAMES[mode];
+  }
+
+  function cycleFitMode() {
+    var cur = STORE.get(KEYS.FIT_MODE, "contain");
+    if (FIT_MODES.indexOf(cur) === -1) cur = "contain";
+    var next = FIT_MODES[(FIT_MODES.indexOf(cur) + 1) % FIT_MODES.length];
+    STORE.set(KEYS.FIT_MODE, next);
+    applyFitMode();
+    toast("화면 맞춤: " + FIT_NAMES[next], "ok");
+    showOverlayBriefly();
+  }
+
   function playEpisode(ep) {
     show("player");
     player.titleEl.textContent =
       (detailState.info ? detailState.info.title : "") + " · " + (ep.name || "");
     player.loadingEl.classList.remove("hidden");
     player.overlay.classList.remove("hidden");
+    applyFitMode();
 
     apiGet("/api/extract?u=" + encodeURIComponent(ep.play_url)).then(function (j) {
       if (j.error) throw new Error(j.error);
@@ -728,16 +796,44 @@
     showOverlayBriefly();
   }
   function onColor(color) {
-    // 빠른 액션 단축키
+    if (currentScreen === "player") {
+      if (color === "blue") cycleFitMode();
+      return;
+    }
     if (currentScreen === "settings") {
       if (color === "yellow") inputSet("nas-input", "");
       if (color === "green") saveNasAndContinue();
       return;
     }
-    if (currentScreen === "home" && homeState.tab === "search") {
-      if (color === "yellow") inputSet("search-input", "");
-      if (color === "green") doSearch();
-      return;
+    if (currentScreen === "home") {
+      // 검색 탭의 입력 클리어
+      if (homeState.tab === "search") {
+        if (color === "yellow") { inputSet("search-input", ""); return; }
+        if (color === "green") { doSearch(); return; }
+      }
+      // 이어보기 / 즐겨찾기에서 항목 삭제 / 전체 삭제
+      if (homeState.tab === "recent" || homeState.tab === "fav") {
+        if (color === "red") {
+          if (focus.current && typeof focus.current._deleteHandler === "function") {
+            focus.current._deleteHandler();
+          } else {
+            toast("삭제할 항목을 선택하세요", "danger");
+          }
+          return;
+        }
+        if (color === "yellow") {
+          var now = Date.now();
+          if (now - pendingClearAt < 5000) {
+            clearCurrentTab();
+            pendingClearAt = 0;
+            toast("전체 삭제 완료", "ok");
+          } else {
+            pendingClearAt = now;
+            toast("한 번 더 노란색 키를 누르면 전체 삭제됩니다", "danger");
+          }
+          return;
+        }
+      }
     }
   }
 

@@ -913,7 +913,7 @@
     showOverlayBriefly();
   }
 
-  function playEpisode(ep) {
+  function playEpisode(ep, bypass) {
     show("player");
     player.titleEl.textContent =
       (detailState.info ? detailState.info.title : "") + " · " + (ep.name || "");
@@ -921,7 +921,7 @@
     player.overlay.classList.remove("hidden");
     applyFitMode();
 
-    apiGet("/api/extract?u=" + encodeURIComponent(ep.play_url)).then(function (j) {
+    apiGet("/api/extract?u=" + encodeURIComponent(ep.play_url), { bypass: bypass }).then(function (j) {
       if (j.error) throw new Error(j.error);
       var src = j.proxy_url || resolveNasUrl(j.proxy_path);
       // 이전 시청 listener가 남아있을 경우 정리
@@ -1390,6 +1390,15 @@
   function onColor(color) {
     if (currentScreen === "player") {
       if (color === "blue") cycleFitMode();
+      if (color === "red") {
+        // 스트림 URL 만료 등으로 재생 안 될 때 — extract 캐시 무효화 후 같은 화 재시도
+        if (player.currentEp) {
+          var ep = player.currentEp;
+          toast("스트림 다시 받기...", "ok");
+          stopPlayback();
+          playEpisode(ep, true);
+        }
+      }
       return;
     }
     if (currentScreen === "settings") {

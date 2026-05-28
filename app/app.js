@@ -1048,9 +1048,41 @@
     el.click();
   }
 
-  // 모듈 webview에서 직접 종료/이동 API를 부르지 않는다.
-  // detail/player에서만 우리가 화면을 처리하고, home 탭에서 back을 누를 때는
-  // preventDefault를 빼서 TizenBrew/webview의 default 처리(메뉴 복귀)에 그대로 맡긴다.
+  // ---------- 종료 chain (TizenTube 패턴 차용) ----------
+  // hide가 silent fail해도 사용자가 한 번 더 back을 누르면 다음 단계로.
+  var _exitStep = 0;
+  var _exitLastAt = 0;
+  function tryExitChain() {
+    var now = Date.now();
+    if (now - _exitLastAt > 1500) _exitStep = 0;
+    _exitLastAt = now;
+
+    if (_exitStep === 0) {
+      _exitStep = 1;
+      try {
+        if (typeof tizen !== "undefined" && tizen.application
+            && tizen.application.getCurrentApplication) {
+          var app = tizen.application.getCurrentApplication();
+          if (typeof app.hide === "function") { app.hide(); return; }
+        }
+      } catch (_) {}
+      // tizen 자체가 없는 환경이면 곧장 step 1로 진행
+      _exitStep = 1;
+    }
+    if (_exitStep === 1) {
+      _exitStep = 2;
+      try {
+        if (history.length > 1) { history.back(); return; }
+      } catch (_) {}
+    }
+    // step 2+: 최후 fallback
+    try {
+      if (typeof tizen !== "undefined" && tizen.application
+          && tizen.application.getCurrentApplication) {
+        tizen.application.getCurrentApplication().exit();
+      }
+    } catch (_) {}
+  }
 
   // ---------- 키 이벤트 ----------
   var lastBackAt = 0;
@@ -1188,18 +1220,14 @@
           if (activeTab) { setFocus(activeTab); return true; }
         }
       }
-      // 탭에 포커스 있음 → 가능하면 앱을 백그라운드로(suspend), 안 되면 default 양보.
-      // hide()는 외부 origin 모듈에서는 대체로 no-op이지만, 시도해도 잃을 건 없음.
-      // 성공 케이스(메모리 유지된 채 hide)와 실패 시 default 동작 모두를 노린다.
-      try {
-        if (typeof tizen !== "undefined"
-            && tizen.application
-            && tizen.application.getCurrentApplication) {
-          var app = tizen.application.getCurrentApplication();
-          if (typeof app.hide === "function") app.hide();
-        }
-      } catch (_) {}
-      return false;  // preventDefault 안 함 — default(메뉴 복귀)도 백업으로 동작
+      // 탭에 포커스 있음 → TizenTube 류의 customapp 패턴을 단계적 fallback으로:
+      //   1차: tizen.application...hide()  (메모리 유지 백그라운드)
+      //   2차: history.back()              (TizenBrew 메뉴로)
+      //   3차: tizen.application...exit()  (강제 종료 — 최후 보루)
+      // hide/history.back이 silent fail하는 환경에서는 사용자가 back을 한 번 더
+      // 누를 때마다 다음 단계로 진행되도록 한다. 1.5초 이상 비활성 시 단계 리셋.
+      tryExitChain();
+      return true;  // 우리가 시도했으니 preventDefault
     }
 
     // detail / player / settings(NAS 설정 완료) → 한 단계 뒤로

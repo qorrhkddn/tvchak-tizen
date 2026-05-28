@@ -48,7 +48,7 @@
           try {
             var trimmed = v.slice(0, Math.floor(v.length / 2));
             localStorage.setItem(k, JSON.stringify(trimmed));
-            try { showToast && toast("저장 공간 부족: 오래된 시청기록 일부 삭제", "danger"); } catch(_){}
+            try { if (typeof toast === "function") toast("저장 공간 부족: 오래된 시청기록 일부 삭제", "danger"); } catch(_){}
             return true;
           } catch (_) {}
         }
@@ -142,14 +142,15 @@
   };
 
   function isEffectivelyHidden(el) {
+    // 안전 모드: 자기 또는 조상에 .hidden / display:none 만 검사.
+    // offsetParent 검사는 일부 Tizen webview에서 visible 카드도 null로 잡혀
+    // focus.items가 통째로 비어버리는 회귀를 만들었다. 빼는 게 안정적.
     var node = el;
     while (node && node !== document) {
       if (node.classList && node.classList.contains("hidden")) return true;
       if (node.style && node.style.display === "none") return true;
       node = node.parentElement;
     }
-    // offsetParent 가 null이면 화면에서 렌더 안됨 (display:none 부모 등)
-    if (el.offsetParent === null && el.tagName !== "BODY") return true;
     return false;
   }
 
@@ -588,6 +589,10 @@
   var detailState = null;
 
   function openDetail(item, historyHit) {
+    // 돌아왔을 때 같은 카드로 포커스 회복할 수 있도록 직전 위치 기록
+    if (currentScreen === "home" && focus.current) {
+      homeState.lastFocus = focus.current;
+    }
     detailState = { item: item, info: null, historyHit: historyHit || findHistory(item.url) };
     show("detail");
     document.getElementById("detail-title").textContent = item.title || "";
@@ -856,14 +861,22 @@
   window.addEventListener("beforeunload", persistOnExit);
 
   // ---------- 화면 전환시 ----------
-  // 홈 화면으로 "처음 들어올 때"만 탭을 다시 그린다. detail/player에서 goBack으로
-  // 돌아온 경우엔 그리드 상태(스크롤·페이지·포커스)를 유지하는 게 자연스럽다.
+  // 홈 화면으로 돌아올 때는 그리드는 재로딩하지 않고(스크롤·페이지 유지),
+  // 포커스만 home 컨테이너 기준으로 다시 잡는다. 이 단계가 빠지면
+  // focus.items가 이전 화면(detail/player)의 요소를 들고 있어 키 입력이 먹지 않는다.
   function onScreenEnter(name) {
     if (name === "settings") renderSettings();
     if (name === "home") {
       apiGet("/api/domain").then(function (j) {
         document.getElementById("seed-info").textContent = j.seed_domain || "";
       }).catch(function () {});
+      // 직전에 home에서 봤던 카드가 있으면 그쪽으로, 없으면 활성 탭으로
+      var preferred = homeState.lastFocus
+        && document.body.contains(homeState.lastFocus)
+        ? homeState.lastFocus
+        : document.querySelector("#tabs .tab.active");
+      focus.current = null;
+      rebuildFocus(screens.home, preferred);
     }
   }
 

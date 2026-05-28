@@ -153,16 +153,37 @@
   }
 
   // ---------- 가상 키보드 ----------
+  // 행마다 첫 글자 객체로 "special" 표시 가능: {ch: "⌫", act: "backspace", wide: true}
   var KBD_ROWS_URL = [
     ["1","2","3","4","5","6","7","8","9","0"],
     ["q","w","e","r","t","y","u","i","o","p"],
     ["a","s","d","f","g","h","j","k","l","-"],
-    ["z","x","c","v","b","n","m",".","_","/"]
+    ["z","x","c","v","b","n","m",".","_","@"],
+    [
+      { ch: ":", act: "char" },
+      { ch: "/", act: "char" },
+      { ch: ".", act: "char" },
+      { ch: "http://", act: "string", wide: true },
+      { ch: "https://", act: "string", wide: true },
+      { ch: "공백", act: "space", wide: true },
+      { ch: "⌫", act: "backspace", wide: true },
+      { ch: "전체삭제", act: "clear", wide: true }
+    ]
   ];
-  var KBD_ROWS_TEXT = [
+  var KBD_ROWS_SEARCH = [
+    ["1","2","3","4","5","6","7","8","9","0"],
     ["ㅁ","ㅂ","ㅈ","ㄷ","ㄱ","ㅅ","ㅛ","ㅕ","ㅑ","ㅐ"],
     ["ㄴ","ㅇ","ㄹ","ㅎ","ㅗ","ㅓ","ㅏ","ㅣ","ㅡ","ㅔ"],
-    ["ㅋ","ㅌ","ㅊ","ㅍ","ㅠ","ㅜ","ㅡ",".",",","?"]
+    ["ㅋ","ㅌ","ㅊ","ㅍ","ㅠ","ㅜ","ㅡ",".",",","?"],
+    ["q","w","e","r","t","y","u","i","o","p"],
+    ["a","s","d","f","g","h","j","k","l","-"],
+    ["z","x","c","v","b","n","m"," ","-","_"],
+    [
+      { ch: "공백", act: "space", wide: true },
+      { ch: "⌫", act: "backspace", wide: true },
+      { ch: "전체삭제", act: "clear", wide: true },
+      { ch: "검색", act: "submit-search", wide: true }
+    ]
   ];
 
   function buildKeyboard(containerId, rows, opts) {
@@ -171,11 +192,13 @@
     rows.forEach(function (row, ri) {
       var rowEl = document.createElement("div");
       rowEl.className = "kbd-row";
-      row.forEach(function (ch, ci) {
+      row.forEach(function (item, ci) {
+        var spec = (typeof item === "string") ? { ch: item, act: "char" } : item;
         var key = document.createElement("div");
-        key.className = "kbd-key focusable";
-        key.textContent = ch;
-        key.dataset.char = ch;
+        key.className = "kbd-key focusable" + (spec.wide ? " wide" : "");
+        key.textContent = spec.ch;
+        key.dataset.char = spec.ch;
+        key.dataset.act = spec.act || "char";
         key.dataset.row = String(opts.rowOffset + ri);
         key.dataset.col = String(ci);
         rowEl.appendChild(key);
@@ -208,16 +231,16 @@
   // ---------- 설정 화면 ----------
   function renderSettings() {
     var nasInput = document.getElementById("nas-input");
-    nasInput.dataset.value = nasUrl();
-    if (!nasInput.dataset.value) nasInput.classList.add("empty");
-    nasInput.dataset.placeholder = "http://192.168.1.100:7777";
+    nasInput.dataset.value = nasUrl() || "http://192.168.1.230:7777";
+    if (!nasUrl()) nasInput.classList.remove("empty");
+    nasInput.dataset.placeholder = "http://192.168.1.230:7777";
 
     buildKeyboard("virtual-keyboard", KBD_ROWS_URL, { rowOffset: 2 });
 
-    // 행 0: 저장/탐색 버튼, 행 1: nas-input (포커스 불가), 행 2~5: 키보드, 행 6: 액션
+    // 행 0: nas-input(포커스 불가), 행 2~6: 키보드, 행 7: 액션 버튼
     var actions = document.querySelectorAll("#screen-settings .settings-actions .focusable");
-    actions[0].dataset.row = "6"; actions[0].dataset.col = "0";
-    actions[1].dataset.row = "6"; actions[1].dataset.col = "1";
+    actions[0].dataset.row = "7"; actions[0].dataset.col = "0";
+    actions[1].dataset.row = "7"; actions[1].dataset.col = "1";
 
     document.getElementById("settings-status").textContent = "";
     rebuildFocus(screens.settings);
@@ -227,6 +250,7 @@
     if (isAction === "backspace") { inputBackspace("nas-input"); return; }
     if (isAction === "punct") { inputAppend("nas-input", ":"); return; }
     if (isAction === "slash") { inputAppend("nas-input", "/"); return; }
+    if (isAction === "clear") { inputClear("nas-input"); return; }
     if (ch) { inputAppend("nas-input", ch); }
   }
 
@@ -329,8 +353,8 @@
   function renderSearchTab() {
     var input = document.getElementById("search-input");
     if (!input.dataset.value) input.classList.add("empty");
-    input.dataset.placeholder = "검색어 입력 후 OK";
-    buildKeyboard("search-keyboard", KBD_ROWS_URL, { rowOffset: 2 });
+    input.dataset.placeholder = "검색어 입력 (예: 취사병)";
+    buildKeyboard("search-keyboard", KBD_ROWS_SEARCH, { rowOffset: 2 });
     // 검색 버튼은 row=1
     var goBtn = document.querySelector('[data-action="search-go"]');
     goBtn.dataset.row = "1"; goBtn.dataset.col = "10";
@@ -614,14 +638,22 @@
     if (!focus.current) return;
     var el = focus.current;
     if (el.classList.contains("kbd-key")) {
-      var ch = el.dataset.char;
-      if (currentScreen === "settings") onSettingsKey(ch);
-      else if (currentScreen === "home" && homeState.tab === "search") {
-        inputAppend("search-input", ch);
-      }
+      handleKeyboardKey(el);
       return;
     }
     el.click();
+  }
+
+  function handleKeyboardKey(el) {
+    var act = el.dataset.act || "char";
+    var ch = el.dataset.char;
+    var targetInputId = (currentScreen === "settings") ? "nas-input" : "search-input";
+    if (act === "char") { inputAppend(targetInputId, ch); return; }
+    if (act === "string") { inputAppend(targetInputId, ch); return; }
+    if (act === "space") { inputAppend(targetInputId, " "); return; }
+    if (act === "backspace") { inputBackspace(targetInputId); return; }
+    if (act === "clear") { inputClear(targetInputId); return; }
+    if (act === "submit-search") { doSearch(); return; }
   }
 
   // ---------- 키 이벤트 ----------
@@ -678,16 +710,16 @@
     showOverlayBriefly();
   }
   function onColor(color) {
+    // 키보드에 모든 키가 들어있으므로 색상은 자주 쓰는 액션만 단축키 역할.
     if (currentScreen === "settings") {
-      if (color === "red") onSettingsKey(null, "backspace");
-      if (color === "blue") onSettingsKey(null, "punct");
-      if (color === "yellow") onSettingsKey(null, "slash");
+      if (color === "red") inputBackspace("nas-input");
+      if (color === "yellow") inputClear("nas-input");
       if (color === "green") saveNasAndContinue();
       return;
     }
     if (currentScreen === "home" && homeState.tab === "search") {
       if (color === "red") inputBackspace("search-input");
-      if (color === "yellow") inputAppend("search-input", " ");
+      if (color === "yellow") inputClear("search-input");
       if (color === "green") doSearch();
       return;
     }

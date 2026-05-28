@@ -966,6 +966,89 @@
       toast("이미지 캐시 " + n + "개 삭제", "ok");
       return;
     }
+    if (action === "diag-tizen") {
+      diagTizen();
+      return;
+    }
+  }
+
+  function diagTizen() {
+    var parts = [];
+    parts.push("[객체 인스펙션]");
+    parts.push("tizen = " + typeof tizen);
+    var app = null;
+    try {
+      if (typeof tizen !== "undefined" && tizen) {
+        parts.push("tizen.application = " + typeof tizen.application);
+        if (tizen.application) {
+          parts.push("getCurrentApplication = " + typeof tizen.application.getCurrentApplication);
+          if (typeof tizen.application.getCurrentApplication === "function") {
+            app = tizen.application.getCurrentApplication();
+            parts.push("app = " + (app ? typeof app : "null"));
+            if (app) {
+              parts.push("app.hide = " + typeof app.hide);
+              parts.push("app.exit = " + typeof app.exit);
+              parts.push("app.kill = " + typeof app.kill);
+              if (app.appInfo) {
+                parts.push("app.appInfo.id = " + (app.appInfo.id || "?"));
+                parts.push("app.appInfo.version = " + (app.appInfo.version || "?"));
+              } else {
+                parts.push("app.appInfo = " + typeof app.appInfo);
+              }
+            }
+          }
+        }
+        parts.push("tvinputdevice = " + typeof tizen.tvinputdevice);
+        parts.push("systeminfo = " + typeof tizen.systeminfo);
+      }
+    } catch (e) {
+      parts.push("INSPECT ERR: " + (e && e.message));
+    }
+
+    // visibility change 한 번만 잡아내서 결과 캡처
+    try {
+      var onVis = function () {
+        document.removeEventListener("visibilitychange", onVis);
+        try { console.log("[tvchak diag] visibility →", document.visibilityState); } catch (_) {}
+        // 화면이 다시 돌아왔을 때(visible)에만 toast로 알림
+        if (document.visibilityState === "visible") {
+          toast("hide → 돌아옴 (실제로 백그라운드 갔다 옴 — 가설 C: privilege OK)", "ok");
+        }
+      };
+      document.addEventListener("visibilitychange", onVis);
+      setTimeout(function () {
+        document.removeEventListener("visibilitychange", onVis);
+      }, 30000);
+    } catch (_) {}
+
+    parts.push("");
+    parts.push("[hide() 호출 시도]");
+    var beforeState = "?";
+    try { beforeState = document.visibilityState; } catch (_) {}
+    parts.push("before: visibilityState = " + beforeState);
+    try {
+      if (app && typeof app.hide === "function") {
+        var ret = app.hide();
+        parts.push("hide() 반환값 = " + (ret === undefined ? "undefined" : JSON.stringify(ret)));
+      } else {
+        parts.push("hide() 호출 불가 (app 또는 hide 함수 없음)");
+      }
+    } catch (e) {
+      parts.push("hide ERR: " + (e && (e.name + " " + e.message)));
+    }
+    // hide가 동기적으로 처리되지 않으면 이 라인이 그대로 찍힘
+    try { parts.push("after (sync): visibilityState = " + document.visibilityState); } catch (_) {}
+
+    var line = parts.join("\n");
+    var el = document.getElementById("settings-status");
+    if (el) {
+      el.style.whiteSpace = "pre-wrap";
+      el.style.fontFamily = "ui-monospace, monospace";
+      el.style.fontSize = "18px";
+      el.textContent = line;
+    }
+    try { console.log("[tvchak diag]\n" + line); } catch (_) {}
+    toast("진단 결과는 화면 아래에 표시됨", "ok");
   }
 
   function clickFocusable() {

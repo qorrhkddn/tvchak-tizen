@@ -91,6 +91,15 @@
     if (/^https?:\/\//.test(pathOrUrl)) return pathOrUrl;
     return (nasUrl() || "").replace(/\/$/, "") + pathOrUrl;
   }
+  // 외부 이미지 URL을 NAS /proxy로 감싼다. entry에 poster_proxy_path가 없는
+  // (v0.4.x 시절 저장된) 항목의 fallback. /proxy는 ref 파라미터 없으면
+  // 시드 도메인을 자동으로 referer로 사용한다.
+  function wrapAsProxy(externalUrl) {
+    if (!externalUrl) return "";
+    var base = nasUrl();
+    if (!base) return externalUrl;
+    return base.replace(/\/$/, "") + "/proxy?u=" + encodeURIComponent(externalUrl);
+  }
   var KEYS = {
     NAS: "tvchak.nasUrl",
     HISTORY: "tvchak.history",
@@ -461,7 +470,9 @@
 
     var imgWrap = document.createElement("div");
     imgWrap.className = "card-img-wrap";
-    var posterUrl = it.poster_proxy_url || it.poster || "";
+    // poster_proxy_url 우선, 없으면 외부 poster를 NAS /proxy로 감싸기.
+    // entry에 path 정보가 빠진 옛 항목도 NAS만 켜져 있으면 표시되도록.
+    var posterUrl = it.poster_proxy_url || wrapAsProxy(it.poster) || it.poster || "";
     // 캐시 키는 NAS prefix 제거한 path. recent/fav 항목은 이미 path를 들고 있다.
     var cacheKey = it.poster_proxy_path
       || (it.poster_proxy_url ? stripNasPrefix(it.poster_proxy_url) : (it.poster || ""));
@@ -638,7 +649,8 @@
     document.getElementById("detail-title").textContent = item.title || "";
     var posterEl = document.getElementById("detail-poster");
     var detailCacheKey = stripNasPrefix(item.poster_proxy_url || item.poster || "");
-    setCardImage(posterEl, detailCacheKey, item.poster_proxy_url || item.poster || "", item.poster);
+    var detailFirstUrl = item.poster_proxy_url || wrapAsProxy(item.poster) || item.poster || "";
+    setCardImage(posterEl, detailCacheKey, detailFirstUrl, item.poster);
     document.getElementById("detail-plot").textContent = "불러오는 중...";
     document.getElementById("episode-list").innerHTML = "";
     document.getElementById("detail-resume-info").textContent = "";

@@ -9,19 +9,39 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "0.8.0";
+  var APP_VERSION = "0.9.0";
 
-  // ---------- API 응답 캐시 (localStorage, 6시간) ----------
-  // Cloudflare가 짧은 시간 내 반복 요청을 RST로 끊으므로, 같은 응답을 6시간
-  // 동안 재사용해 NAS→tvchak 호출 자체를 줄인다. 사용자는 파랑 키 / 화면의
-  // ↻ 버튼으로 명시적 갱신 가능.
+  // ---------- API 응답 캐시 (localStorage) ----------
+  // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
+  // 설정 화면에서 시간(1~168, 즉 1주일까지)으로 조정 가능.
+  // 명시적 갱신은 ↻ 버튼 또는 파랑 키.
   var API_CACHE_PREFIX = "tvchak.api:";
-  var API_CACHE_TTL_MS = 6 * 3600 * 1000;
+  var DEFAULT_CACHE_TTL_HOURS = 24;
+  var MIN_CACHE_TTL_HOURS = 1;
+  var MAX_CACHE_TTL_HOURS = 168;   // 7일
+
+  function getCacheTtlHours() {
+    var v = STORE.get("tvchak.cacheTtlHours", DEFAULT_CACHE_TTL_HOURS);
+    var n = parseInt(v, 10);
+    if (!isFinite(n) || n < MIN_CACHE_TTL_HOURS || n > MAX_CACHE_TTL_HOURS) {
+      n = DEFAULT_CACHE_TTL_HOURS;
+    }
+    return n;
+  }
+  function setCacheTtlHours(input) {
+    var n = parseInt(input, 10);
+    if (!isFinite(n)) return getCacheTtlHours();
+    if (n < MIN_CACHE_TTL_HOURS) n = MIN_CACHE_TTL_HOURS;
+    if (n > MAX_CACHE_TTL_HOURS) n = MAX_CACHE_TTL_HOURS;
+    STORE.set("tvchak.cacheTtlHours", n);
+    return n;
+  }
+  function getCacheTtlMs() { return getCacheTtlHours() * 3600 * 1000; }
 
   function _isCacheablePath(path) {
     if (!path) return false;
-    // extract는 휘발성, domain/healthz는 의미 없음
-    if (path.indexOf("/api/extract") === 0) return false;
+    // domain/healthz/diag는 의미 없음. /api/extract는 사용자 요청대로 캐시 포함
+    // (스트림 URL이 만료될 가능성은 있지만 재생 안 되면 ↻ 갱신 가능).
     if (path.indexOf("/api/domain") === 0) return false;
     if (path.indexOf("/healthz") === 0) return false;
     if (path.indexOf("/api/diag") === 0) return false;
@@ -33,7 +53,7 @@
       var v = localStorage.getItem(API_CACHE_PREFIX + path);
       if (!v) return null;
       var parsed = JSON.parse(v);
-      if (!parsed || (Date.now() - (parsed.ts || 0)) > API_CACHE_TTL_MS) return null;
+      if (!parsed || (Date.now() - (parsed.ts || 0)) > getCacheTtlMs()) return null;
       return parsed.data;
     } catch (e) { return null; }
   }
@@ -418,6 +438,14 @@
       actions[i].dataset.row = "1";
       actions[i].dataset.col = String(i);
     }
+
+    var ttlInput = document.getElementById("cache-ttl-input");
+    if (ttlInput) {
+      ttlInput.value = getCacheTtlHours();
+      ttlInput.dataset.row = "2"; ttlInput.dataset.col = "0";
+    }
+    var saveTtlBtn = document.querySelector('[data-action="save-cache-ttl"]');
+    if (saveTtlBtn) { saveTtlBtn.dataset.row = "2"; saveTtlBtn.dataset.col = "1"; }
 
     document.getElementById("settings-status").textContent = "";
     focus.current = null;
@@ -1070,6 +1098,13 @@
     }
     if (action === "diag-tizen") {
       diagTizen();
+      return;
+    }
+    if (action === "save-cache-ttl") {
+      var el = document.getElementById("cache-ttl-input");
+      var saved = setCacheTtlHours(el ? el.value : DEFAULT_CACHE_TTL_HOURS);
+      if (el) el.value = saved;
+      toast("캐시 유지 시간 저장: " + saved + "시간", "ok");
       return;
     }
   }

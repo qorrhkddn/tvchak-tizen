@@ -27,6 +27,15 @@
         <button class="btn btn-secondary focusable" data-action="clear-api-cache">API 응답 캐시 비우기</button>
         <button class="btn btn-secondary focusable" data-action="diag-tizen">Tizen API 진단</button>
       </div>
+
+      <div class="settings-input-row" style="margin-top: 24px;">
+        <p class="muted" style="margin-bottom: 4px;">
+          API 응답 캐시 유지 시간 (시간, 1~168) — 기본 24시간
+        </p>
+        <input id="cache-ttl-input" class="text-input focusable" type="number"
+               min="1" max="168" step="1" style="min-width: 200px;">
+        <button class="btn btn-secondary focusable" data-action="save-cache-ttl">캐시 시간 저장</button>
+      </div>
       <div id="settings-status" class="muted"></div>
 
       <div class="hint" style="margin-top: 28px; line-height: 1.7;">
@@ -38,7 +47,7 @@
         · <strong>숫자 1~7</strong> (홈에서): 영화/드라마/예능/애니/검색/이어보기/즐겨찾기 바로 이동<br>
         · <strong>숫자 1~9, 0</strong> (상세에서): 해당 회차 바로 재생 (0 = 10화)<br>
         · <strong>파랑 키</strong>: 현재 화면 새로고침 (캐시 무시) — 플레이어에선 화면 맞춤<br>
-        · 응답은 <strong>6시간 캐시</strong>됨 (Cloudflare 차단 회피). 새 결과 보려면 ↻ 또는 파랑 키.<br>
+        · 응답 <strong>캐시 (기본 24h, 1~168h 조정)</strong> — 새 결과는 ↻ / 파랑 키.<br>
         · 플레이어: <strong>◀▶</strong> 10초 시킹 / <strong>▶⏸</strong> 재생·정지<br>
         · 이어보기·즐겨찾기: <strong>빨강 키</strong> 항목 삭제 / <strong>노랑 키 ×2</strong> 전체 삭제
       </div>

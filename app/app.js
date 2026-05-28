@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "0.9.2";
+  var APP_VERSION = "0.9.3";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -177,7 +177,12 @@
   function stripNasPrefix(url) {
     if (!url) return url;
     var base = nasUrl();
-    if (base && url.indexOf(base) === 0) return url.slice(base.length);
+    if (base && url.indexOf(base) === 0) {
+      var rest = url.slice(base.length);
+      // 끝 슬래시 포함 prefix를 자르면 path가 슬래시 없이 시작. 보정.
+      if (rest && rest.charAt(0) !== "/") rest = "/" + rest;
+      return rest;
+    }
     // 일반적인 http://...:port/proxy?... 형태도 안전하게 path만 잘라냄
     var m = url.match(/^https?:\/\/[^\/]+(\/.*)$/);
     return m ? m[1] : url;
@@ -185,7 +190,11 @@
   function resolveNasUrl(pathOrUrl) {
     if (!pathOrUrl) return "";
     if (/^https?:\/\//.test(pathOrUrl)) return pathOrUrl;
-    return (nasUrl() || "").replace(/\/$/, "") + pathOrUrl;
+    var base = (nasUrl() || "").replace(/\/$/, "");
+    // 옛 history 항목에 슬래시 없는 path가 박혀있는 케이스(v0.9.2 이하 버그)
+    // 도 회복 가능하도록 보정.
+    if (pathOrUrl.charAt(0) !== "/") pathOrUrl = "/" + pathOrUrl;
+    return base + pathOrUrl;
   }
   // 외부 이미지 URL을 NAS /proxy로 감싼다. entry에 poster_proxy_path가 없는
   // (v0.4.x 시절 저장된) 항목의 fallback. /proxy는 ref 파라미터 없으면

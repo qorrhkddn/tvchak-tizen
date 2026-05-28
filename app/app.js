@@ -979,49 +979,9 @@
     el.click();
   }
 
-  // ---------- 종료 chain (TizenTube 패턴 차용) ----------
-  // hide가 silent fail해도 사용자가 한 번 더 back을 누르면 다음 단계로.
-  var _exitStep = 0;
-  var _exitLastAt = 0;
-  function tryExitChain() {
-    var now = Date.now();
-    if (now - _exitLastAt > 1500) _exitStep = 0;
-    _exitLastAt = now;
-
-    if (_exitStep === 0) {
-      _exitStep = 1;
-      // hide() + 합성 back 키 dispatch — Tizen webview의 native back 핸들러가
-      // isTrusted=false를 무시하고 처리해주길 기대. 가능성은 낮지만 시도 비용 0.
-      try {
-        if (typeof tizen !== "undefined" && tizen.application
-            && tizen.application.getCurrentApplication) {
-          var app = tizen.application.getCurrentApplication();
-          if (typeof app.hide === "function") app.hide();
-        }
-      } catch (_) {}
-      try {
-        var ev = new KeyboardEvent("keydown", {
-          keyCode: 10009, which: 10009, bubbles: true, cancelable: true
-        });
-        ev._synthetic = true;  // 우리 핸들러가 무한 루프 안 돌게 marker
-        window.dispatchEvent(ev);
-      } catch (_) {}
-      return;
-    }
-    if (_exitStep === 1) {
-      _exitStep = 2;
-      try {
-        if (history.length > 1) { history.back(); return; }
-      } catch (_) {}
-    }
-    // step 2+: 최후 fallback
-    try {
-      if (typeof tizen !== "undefined" && tizen.application
-          && tizen.application.getCurrentApplication) {
-        tizen.application.getCurrentApplication().exit();
-      }
-    } catch (_) {}
-  }
+  // 모듈 webview에서 우리가 직접 종료/이동 API를 호출하지 않는다. detail/player
+  // 같은 내부 화면에서만 우리가 화면 전환을 하고, 탭에서 back을 누르면 그냥
+  // default 동작에 양보. exit()/history.back() 강제 호출은 사용자 의도가 아님.
 
   // ---------- 키 이벤트 ----------
   var lastBackAt = 0;
@@ -1044,8 +1004,6 @@
     // false면 default(Tizen 메뉴로) 양보
   });
   document.addEventListener("keydown", function (e) {
-    // tryExitChain이 dispatch한 합성 이벤트는 무시 — native handler에게만 가도록
-    if (e._synthetic) return;
     var k = e.keyCode;
     var active = document.activeElement;
     var inInput = active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA");
@@ -1165,14 +1123,9 @@
           if (activeTab) { setFocus(activeTab); return true; }
         }
       }
-      // 탭에 포커스 있음 → TizenTube 류의 customapp 패턴을 단계적 fallback으로:
-      //   1차: tizen.application...hide()  (메모리 유지 백그라운드)
-      //   2차: history.back()              (TizenBrew 메뉴로)
-      //   3차: tizen.application...exit()  (강제 종료 — 최후 보루)
-      // hide/history.back이 silent fail하는 환경에서는 사용자가 back을 한 번 더
-      // 누를 때마다 다음 단계로 진행되도록 한다. 1.5초 이상 비활성 시 단계 리셋.
-      tryExitChain();
-      return true;  // 우리가 시도했으니 preventDefault
+      // 탭에 포커스 있음 → 우리는 처리하지 않고 default에 양보(false).
+      // TizenBrew/webview/플랫폼 default 동작에 맡긴다.
+      return false;
     }
 
     // detail / player / settings(NAS 설정 완료) → 한 단계 뒤로

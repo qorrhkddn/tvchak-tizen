@@ -195,6 +195,11 @@
   }
 
   function maybeAutoLoadMore() {
+    // home 화면이 아닐 때는 절대 트리거 금지. detail/player에서 home의 hidden
+    // grid 크기를 잘못 읽어 loadCategoryMore가 트리거되고, 그 응답이 도착할
+    // 때 rebuildFocus(screens.home)가 호출되어 detail의 focus.items를 통째로
+    // 날려버리는 버그가 있었다.
+    if (currentScreen !== "home") return;
     if (listState.mode !== "cat" || !listState.hasMore || listState.loading) return;
     var content = document.querySelector("#screen-home .content");
     if (!content) return;
@@ -410,7 +415,7 @@
 
     if (!items.length) {
       document.getElementById("grid-status").textContent = opts.emptyHint || "결과가 없습니다.";
-      rebuildFocus(screens.home);
+      if (currentScreen === "home") rebuildFocus(screens.home);
       return;
     }
     items.forEach(function (it) { appendCard(grid, it, onClickItem, opts); });
@@ -418,14 +423,14 @@
     if (opts.deleteHint) {
       document.getElementById("grid-status").textContent = opts.deleteHint;
     }
-    rebuildFocus(screens.home);
+    if (currentScreen === "home") rebuildFocus(screens.home);
   }
 
   function appendToGrid(items, onClickItem, opts) {
     opts = opts || {};
     var grid = document.getElementById("grid");
     items.forEach(function (it) { appendCard(grid, it, onClickItem, opts); });
-    rebuildFocus(screens.home);  // 새 카드만 추가, 현재 포커스는 유지됨
+    if (currentScreen === "home") rebuildFocus(screens.home);  // 새 카드만 추가, 현재 포커스는 유지됨
   }
 
   function appendCard(grid, it, onClickItem, opts) {
@@ -508,7 +513,7 @@
     // 그리드 초기화
     document.getElementById("grid").innerHTML = "";
     document.getElementById("grid-status").textContent = "검색어를 입력하세요.";
-    rebuildFocus(screens.home);
+    if (currentScreen === "home") rebuildFocus(screens.home);
   }
 
   function doSearch() {
@@ -909,7 +914,45 @@
     el.click();
   }
 
+  // ---------- 앱을 백그라운드로 (서스펜드) ----------
+  // exit는 webview JS 상태를 통째로 날려서 재진입 시 처음부터 시작하게 만든다.
+  // 가능하면 Tizen Application.hide()로 백그라운드 전환 — 메모리 유지된 채
+  // 잠시 나갔다가 다시 들어오면 같은 화면으로 돌아온다.
+  function suspendApp() {
+    try {
+      if (typeof tizen !== "undefined"
+          && tizen.application
+          && tizen.application.getCurrentApplication) {
+        var app = tizen.application.getCurrentApplication();
+        if (typeof app.hide === "function") {
+          app.hide();
+          return true;
+        }
+      }
+    } catch (_) {}
+    return false;
+  }
+
   // ---------- 키 이벤트 ----------
+  var lastBackAt = 0;
+  function dedupBack() {
+    var now = Date.now();
+    if (now - lastBackAt < 200) return false;  // 중복 발화 차단
+    lastBackAt = now;
+    return true;
+  }
+
+  // Tizen은 일부 모델에서 hardware back을 keydown 대신 tizenhwkey로만 보낸다.
+  document.addEventListener("tizenhwkey", function (e) {
+    if (e.keyName !== "back") return;
+    if (!dedupBack()) return;
+    var active = document.activeElement;
+    if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA")) {
+      try { active.blur(); } catch (_) {}
+    }
+    if (onBack()) e.preventDefault();
+    // false면 default(Tizen 메뉴로) 양보
+  });
   document.addEventListener("keydown", function (e) {
     var k = e.keyCode;
     var active = document.activeElement;
@@ -990,8 +1033,9 @@
           if (activeTab) { setFocus(activeTab); return true; }
         }
       }
-      // 이미 탭에 포커스가 있는 상태 → default 동작(메인 메뉴로 나가기)에 양보
-      return false;
+      // 탭에 포커스 있음 → 백그라운드로 보냄(메모리 유지). hide()를 지원하는
+      // 환경에서는 다음 진입 시 같은 화면으로 복귀. 지원 안 하면 default에 양보.
+      return suspendApp();
     }
 
     // detail / player / settings(NAS 설정 완료) → 한 단계 뒤로

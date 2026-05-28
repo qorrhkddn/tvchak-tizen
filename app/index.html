@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=1920, initial-scale=1">
+  <title>TVChak</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- 설정 화면 (NAS 주소 입력) -->
+    <section id="screen-settings" class="screen hidden">
+      <h1>NAS 주소 입력</h1>
+      <p class="muted">시놀로지 등에서 돌고 있는 TVChak 프록시 서버의 주소를 입력하세요.</p>
+      <p class="muted">예: <code>http://192.168.1.100:7777</code></p>
+      <div class="settings-input-row">
+        <div id="nas-input" class="text-input" data-value=""></div>
+      </div>
+      <div class="hint">방향키: 글자 이동 · OK: 입력 · 적색: 백스페이스 · 청색: 콜론/슬래시 · 녹색: 저장</div>
+      <div id="virtual-keyboard"></div>
+      <div class="settings-actions">
+        <button class="btn focusable" data-action="save-nas">저장하고 시작</button>
+        <button class="btn btn-secondary focusable" data-action="refresh-domain">시드 도메인 자동 탐색</button>
+      </div>
+      <div id="settings-status" class="muted"></div>
+    </section>
+
+    <!-- 홈 (탭) -->
+    <section id="screen-home" class="screen hidden">
+      <header class="top-bar">
+        <div class="brand">TVChak</div>
+        <nav class="tabs" id="tabs">
+          <div class="tab focusable" data-tab="cat-1">영화</div>
+          <div class="tab focusable" data-tab="cat-2">드라마</div>
+          <div class="tab focusable" data-tab="cat-3">예능</div>
+          <div class="tab focusable" data-tab="cat-4">애니</div>
+          <div class="tab focusable" data-tab="search">검색</div>
+          <div class="tab focusable" data-tab="recent">이어보기</div>
+          <div class="tab focusable" data-tab="fav">즐겨찾기</div>
+          <div class="spacer"></div>
+          <div class="seed-info" id="seed-info"></div>
+          <div class="tab focusable" data-tab="settings" title="설정">⚙</div>
+        </nav>
+      </header>
+
+      <!-- 검색 입력 영역 (검색 탭 진입 시 노출) -->
+      <div id="search-area" class="search-area hidden">
+        <div class="search-input-row">
+          <div id="search-input" class="text-input" data-value=""></div>
+          <button class="btn focusable" data-action="search-go">검색</button>
+        </div>
+        <div class="hint">방향키로 키 이동 → OK · 적색: 백스페이스 · 황색: 공백 · 청색: 한/영 (단순 토글) · 녹색: 검색 실행</div>
+        <div id="search-keyboard"></div>
+      </div>
+
+      <main class="content">
+        <div id="grid" class="grid"></div>
+        <div id="grid-status" class="muted center"></div>
+      </main>
+    </section>
+
+    <!-- 상세 화면 -->
+    <section id="screen-detail" class="screen hidden">
+      <header class="top-bar small">
+        <button class="btn btn-secondary focusable" data-action="back">← 뒤로</button>
+        <h2 id="detail-title" class="title-area"></h2>
+      </header>
+      <main class="detail-body">
+        <div class="detail-left">
+          <img id="detail-poster" src="" alt="">
+        </div>
+        <div class="detail-right">
+          <p id="detail-plot" class="muted"></p>
+          <div class="row" style="margin-bottom: 12px;">
+            <button class="btn focusable" data-action="fav-toggle" id="fav-btn">즐겨찾기 추가</button>
+            <span id="detail-resume-info" class="muted"></span>
+          </div>
+          <div id="episode-list" class="episode-list"></div>
+        </div>
+      </main>
+    </section>
+
+    <!-- 플레이어 화면 -->
+    <section id="screen-player" class="screen hidden">
+      <video id="video" preload="auto" autoplay></video>
+      <div id="player-overlay" class="player-overlay">
+        <div class="player-title" id="player-title"></div>
+        <div class="player-progress">
+          <div class="player-progress-bar" id="player-progress-bar"></div>
+        </div>
+        <div class="player-time">
+          <span id="player-cur">00:00</span> / <span id="player-dur">00:00</span>
+        </div>
+        <div class="player-hint">▶/⏸ 재생/정지 · ◀▶ 10초 시킹 · OK 오버레이 · Return 종료</div>
+      </div>
+      <div id="player-loading" class="player-loading">불러오는 중...</div>
+    </section>
+
+    <div id="toast" class="toast hidden"></div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

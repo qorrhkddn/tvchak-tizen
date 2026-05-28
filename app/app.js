@@ -101,6 +101,31 @@
     return keys.length;
   }
 
+  // 같은 detail_url을 가진 history/favorites 항목의 poster_proxy_path를 현재 카드의 path로 맞춤.
+  // 이러면 사용자가 카테고리/검색에서 카드를 보는 것만으로도 이어보기 thumb 키가 정정됨.
+  function syncStoredPath(detailUrl, path) {
+    if (!detailUrl || !path) return;
+    var dirty = false;
+    var hist = STORE.get("tvchak.history", []);
+    for (var i = 0; i < hist.length; i++) {
+      if (hist[i] && hist[i].detail_url === detailUrl && hist[i].poster_proxy_path !== path) {
+        hist[i].poster_proxy_path = path;
+        dirty = true;
+      }
+    }
+    if (dirty) STORE.set("tvchak.history", hist);
+
+    dirty = false;
+    var favs = STORE.get("tvchak.favorites", []);
+    for (var j = 0; j < favs.length; j++) {
+      if (favs[j] && favs[j].detail_url === detailUrl && favs[j].poster_proxy_path !== path) {
+        favs[j].poster_proxy_path = path;
+        dirty = true;
+      }
+    }
+    if (dirty) STORE.set("tvchak.favorites", favs);
+  }
+
   // 카드 img element 채우기. 캐시 있으면 즉시, 없으면 원본 로드 후 백그라운드 캐시.
   function setCardImage(imgEl, cacheKey, url) {
     if (cacheKey) {
@@ -526,6 +551,10 @@
       setCardImage(img, cacheKey, posterUrl);
     }
     card.appendChild(imgWrap);
+    // 카드를 그릴 때마다 history/favorites의 path도 카드 path로 정정해둠 (v0.5.0 잘못된 path 자동 마이그레이션)
+    if (it.url && it.poster_proxy_url) {
+      syncStoredPath(it.url, stripNasPrefix(it.poster_proxy_url));
+    }
 
     var titleEl = document.createElement("div");
     titleEl.className = "card-title";
@@ -907,16 +936,14 @@
       detail_url: it.url,
       title: (info && info.title) || it.title,
       poster: (info && info.poster) || it.poster,
-      // 카드(it)의 path를 우선 — 카드 렌더 때 캐시한 키와 일치시켜야 이어보기 진입 시 캐시 hit.
       poster_proxy_path: stripNasPrefix(it.poster_proxy_url || (info && info.poster_proxy_url)),
       episodes: {},
     };
-    // 기존 entry에 path가 없거나(v0.5.0 이전 저장분), 카드 path가 더 정확하면 보정.
-    if (idx >= 0 && it.poster_proxy_url) {
+    // 카드(it)의 path가 있으면 무조건 그걸로 덮어쓴다 — v0.5.0의 잘못된 path를 정정.
+    // 카드 path는 setCardImage가 캐시 키로 쓰는 값과 같아야 이어보기에서 cache hit.
+    if (it.poster_proxy_url) {
       var betterPath = stripNasPrefix(it.poster_proxy_url);
-      if (betterPath && !entry.poster_proxy_path) {
-        entry.poster_proxy_path = betterPath;
-      }
+      if (betterPath) entry.poster_proxy_path = betterPath;
     }
     entry.episodes = entry.episodes || {};
     entry.episodes[player.currentEp.play_url] = {
@@ -1094,7 +1121,43 @@
     if (k === 404) { onColor("green"); e.preventDefault(); return; }
     if (k === 405) { onColor("yellow"); e.preventDefault(); return; }
     if (k === 406) { onColor("blue"); e.preventDefault(); return; }
+    // 숫자 키 단축 — 홈: 탭 이동, 상세: 회차 바로 재생
+    if (k >= 48 && k <= 57) {
+      if (handleNumberKey(k - 48)) e.preventDefault();
+      return;
+    }
   });
+
+  function handleNumberKey(num) {
+    if (currentScreen === "home") {
+      var tabMap = {
+        1: "cat-1", 2: "cat-2", 3: "cat-3", 4: "cat-4",
+        5: "search", 6: "recent", 7: "fav"
+      };
+      if (tabMap[num]) {
+        selectTab(tabMap[num]);
+        var t = document.querySelector("#tabs .tab.active");
+        if (t) setFocus(t);
+        return true;
+      }
+      return false;
+    }
+    if (currentScreen === "detail" && detailState && detailState.info) {
+      var episodes = detailState.info.episodes || [];
+      // 1~9 → 1~9화, 0 → 10화. 회차 번호로 매칭.
+      var targetEp = num === 0 ? 10 : num;
+      var match = null;
+      for (var i = 0; i < episodes.length; i++) {
+        if (episodes[i].episode === targetEp) { match = episodes[i]; break; }
+      }
+      if (match) {
+        playEpisode(match);
+        return true;
+      }
+      return false;
+    }
+    return false;
+  }
 
   function onArrow(dx, dy) {
     if (currentScreen === "player") {

@@ -1112,6 +1112,7 @@
     // input 포커스 상태에선 IME에 키를 양보. 단 일부는 우리가 처리.
     if (inInput) {
       if (k === 10009 || k === 27) {     // Return/Esc: IME 닫고 한 번에 뒤로까지
+        if (!dedupBack()) { e.preventDefault(); return; }
         active.blur();
         if (onBack()) e.preventDefault();
         return;
@@ -1142,6 +1143,9 @@
     if (k === 40) { onArrow(0, 1); e.preventDefault(); return; }
     if (k === 13) { onOk(); e.preventDefault(); return; }
     if (k === 10009 || k === 8 || k === 27) {
+      // keydown과 tizenhwkey가 같은 back을 둘 다 발화시키는 환경 대비.
+      // 둘 다 onBack을 호출하면 player → detail → home 식으로 두 단계 한꺼번에 뒤로 간다.
+      if (!dedupBack()) { e.preventDefault(); return; }
       if (onBack()) e.preventDefault();
       return;
     }

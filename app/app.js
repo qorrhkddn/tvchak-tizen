@@ -688,7 +688,9 @@
     detailState = { item: item, info: null, historyHit: historyHit || findHistory(item.url) };
     show("detail");
     document.getElementById("detail-title").textContent = item.title || "";
-    document.getElementById("detail-poster").src = item.poster_proxy_url || item.poster || "";
+    var posterEl = document.getElementById("detail-poster");
+    var detailCacheKey = stripNasPrefix(item.poster_proxy_url || item.poster || "");
+    setCardImage(posterEl, detailCacheKey, item.poster_proxy_url || item.poster || "");
     document.getElementById("detail-plot").textContent = "불러오는 중...";
     document.getElementById("episode-list").innerHTML = "";
     document.getElementById("detail-resume-info").textContent = "";
@@ -706,7 +708,11 @@
       detailState.info = j;
       document.getElementById("detail-title").textContent = j.title || item.title || "";
       document.getElementById("detail-plot").textContent = j.plot || "";
-      if (j.poster_proxy_url) document.getElementById("detail-poster").src = j.poster_proxy_url;
+      // 상세 응답의 poster가 카드와 다른 경우에만 갱신
+      if (j.poster_proxy_url && j.poster_proxy_url !== item.poster_proxy_url) {
+        var posterEl2 = document.getElementById("detail-poster");
+        setCardImage(posterEl2, stripNasPrefix(j.poster_proxy_url), j.poster_proxy_url);
+      }
       renderEpisodes(j.episodes || []);
       updateFavButton();
       updateResumeInfo();
@@ -780,8 +786,9 @@
         title: (info && info.title) || it.title,
         detail_url: it.url,
         poster: (info && info.poster) || it.poster,
-        // NAS 주소 변경에 대비해 path만 저장
-        poster_proxy_path: stripNasPrefix((info && info.poster_proxy_url) || it.poster_proxy_url),
+        // 카드(it)의 path를 우선 — 카드 렌더 시점에 이미 이미지 캐시한 키와 일치시키기 위함.
+        // detail 응답의 poster URL이 카드 썸네일과 다른 이미지인 경우가 있다.
+        poster_proxy_path: stripNasPrefix(it.poster_proxy_url || (info && info.poster_proxy_url)),
       });
       toast("즐겨찾기 추가", "ok");
     }
@@ -900,9 +907,17 @@
       detail_url: it.url,
       title: (info && info.title) || it.title,
       poster: (info && info.poster) || it.poster,
-      poster_proxy_path: stripNasPrefix((info && info.poster_proxy_url) || it.poster_proxy_url),
+      // 카드(it)의 path를 우선 — 카드 렌더 때 캐시한 키와 일치시켜야 이어보기 진입 시 캐시 hit.
+      poster_proxy_path: stripNasPrefix(it.poster_proxy_url || (info && info.poster_proxy_url)),
       episodes: {},
     };
+    // 기존 entry에 path가 없거나(v0.5.0 이전 저장분), 카드 path가 더 정확하면 보정.
+    if (idx >= 0 && it.poster_proxy_url) {
+      var betterPath = stripNasPrefix(it.poster_proxy_url);
+      if (betterPath && !entry.poster_proxy_path) {
+        entry.poster_proxy_path = betterPath;
+      }
+    }
     entry.episodes = entry.episodes || {};
     entry.episodes[player.currentEp.play_url] = {
       position: pos, duration: dur,

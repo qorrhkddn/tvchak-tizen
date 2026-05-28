@@ -9,7 +9,79 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "0.7.4";
+  var APP_VERSION = "0.8.0";
+
+  // ---------- API 응답 캐시 (localStorage, 6시간) ----------
+  // Cloudflare가 짧은 시간 내 반복 요청을 RST로 끊으므로, 같은 응답을 6시간
+  // 동안 재사용해 NAS→tvchak 호출 자체를 줄인다. 사용자는 파랑 키 / 화면의
+  // ↻ 버튼으로 명시적 갱신 가능.
+  var API_CACHE_PREFIX = "tvchak.api:";
+  var API_CACHE_TTL_MS = 6 * 3600 * 1000;
+
+  function _isCacheablePath(path) {
+    if (!path) return false;
+    // extract는 휘발성, domain/healthz는 의미 없음
+    if (path.indexOf("/api/extract") === 0) return false;
+    if (path.indexOf("/api/domain") === 0) return false;
+    if (path.indexOf("/healthz") === 0) return false;
+    if (path.indexOf("/api/diag") === 0) return false;
+    return path.indexOf("/api/") === 0;
+  }
+
+  function cacheRead(path) {
+    try {
+      var v = localStorage.getItem(API_CACHE_PREFIX + path);
+      if (!v) return null;
+      var parsed = JSON.parse(v);
+      if (!parsed || (Date.now() - (parsed.ts || 0)) > API_CACHE_TTL_MS) return null;
+      return parsed.data;
+    } catch (e) { return null; }
+  }
+  function cacheWrite(path, data) {
+    try {
+      localStorage.setItem(API_CACHE_PREFIX + path,
+                           JSON.stringify({ ts: Date.now(), data: data }));
+    } catch (e) {
+      pruneApiCache(0.5);
+      try {
+        localStorage.setItem(API_CACHE_PREFIX + path,
+                             JSON.stringify({ ts: Date.now(), data: data }));
+      } catch (_) {}
+    }
+  }
+  function pruneApiCache(ratio) {
+    var entries = [];
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        if (k && k.indexOf(API_CACHE_PREFIX) === 0) {
+          try {
+            var v = JSON.parse(localStorage.getItem(k));
+            entries.push({ k: k, ts: (v && v.ts) || 0 });
+          } catch (_) { try { localStorage.removeItem(k); } catch (__) {} }
+        }
+      }
+    } catch (_) {}
+    entries.sort(function (a, b) { return a.ts - b.ts; });
+    var n = Math.floor(entries.length * (ratio || 0.5));
+    for (var j = 0; j < n; j++) {
+      try { localStorage.removeItem(entries[j].k); } catch (_) {}
+    }
+  }
+  function clearApiCache() {
+    var keys = [];
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        if (k && k.indexOf(API_CACHE_PREFIX) === 0) keys.push(k);
+      }
+    } catch (_) {}
+    keys.forEach(function (k) { try { localStorage.removeItem(k); } catch (_) {} });
+    return keys.length;
+  }
+  function cacheInvalidate(path) {
+    try { localStorage.removeItem(API_CACHE_PREFIX + path); } catch (_) {}
+  }
 
   // ---------- TizenBrew TVInputDevice ----------
   function registerKeys() {
@@ -262,9 +334,16 @@
   var API_TIMEOUT_MS = 15000;
   var apiSeq = 0;
 
-  function apiGet(path) {
+  function apiGet(path, opts) {
+    opts = opts || {};
     var base = nasUrl();
     if (!base) return Promise.reject(new Error("NAS 주소가 설정되지 않았습니다."));
+
+    // 캐시 (bypass 옵션 없을 때만)
+    if (_isCacheablePath(path) && !opts.bypass) {
+      var cached = cacheRead(path);
+      if (cached) return Promise.resolve(cached);
+    }
 
     var controller = null;
     var fetchOpts = {};
@@ -276,6 +355,7 @@
       if (controller) try { controller.abort(); } catch (_) {}
     }, API_TIMEOUT_MS);
 
+    var doCache = _isCacheablePath(path);
     return fetch(base.replace(/\/$/, "") + path, fetchOpts)
       .then(function (r) {
         if (!r.ok) {
@@ -287,7 +367,11 @@
           });
         }
         return r.text().then(function (t) {
-          try { return JSON.parse(t); }
+          try {
+            var parsed = JSON.parse(t);
+            if (doCache) cacheWrite(path, parsed);
+            return parsed;
+          }
           catch (e) { throw new Error("JSON 파싱 실패: " + t.slice(0, 80)); }
         });
       })
@@ -503,14 +587,15 @@
     listState.itemCount = i + 1;
   }
 
-  function loadCategoryFirst() {
+  function loadCategoryFirst(bypass) {
     document.getElementById("grid-status").textContent = "불러오는 중...";
     document.getElementById("grid").innerHTML = "";
     listState.itemCount = 0;
     listState.loading = true;
     listState.token = newApiToken();
     var token = listState.token;
-    apiGet("/api/mainpage?cat=" + listState.cat + "&page=" + listState.page)
+    apiGet("/api/mainpage?cat=" + listState.cat + "&page=" + listState.page,
+           { bypass: bypass })
       .then(function (j) {
         if (token !== listState.token) return;   // 사이에 탭 바뀌면 무시
         listState.loading = false;
@@ -566,11 +651,11 @@
     if (currentScreen === "home") rebuildFocus(screens.home);
   }
 
-  function doSearch() {
+  function doSearch(bypass) {
     var q = inputValue("search-input").trim();
     if (!q) { toast("검색어를 입력하세요", "danger"); return; }
     document.getElementById("grid-status").textContent = "검색 중: " + q;
-    apiGet("/api/search?q=" + encodeURIComponent(q)).then(function (j) {
+    apiGet("/api/search?q=" + encodeURIComponent(q), { bypass: bypass }).then(function (j) {
       renderGrid(j.items || [], openDetail);
     }).catch(function (e) {
       document.getElementById("grid-status").textContent = "검색 실패: " + e.message;
@@ -643,7 +728,7 @@
   // ---------- 상세 ----------
   var detailState = null;
 
-  function openDetail(item, historyHit) {
+  function openDetail(item, historyHit, bypass) {
     // 돌아왔을 때 같은 카드로 포커스 회복할 수 있도록 직전 위치 기록
     if (currentScreen === "home" && focus.current) {
       homeState.lastFocus = focus.current;
@@ -668,7 +753,7 @@
     focus.current = null;
     rebuildFocus(screens.detail);
 
-    apiGet("/api/detail?u=" + encodeURIComponent(item.url)).then(function (j) {
+    apiGet("/api/detail?u=" + encodeURIComponent(item.url), { bypass: bypass }).then(function (j) {
       detailState.info = j;
       document.getElementById("detail-title").textContent = j.title || item.title || "";
       document.getElementById("detail-plot").textContent = j.plot || "";
@@ -969,12 +1054,18 @@
   function handleAction(action) {
     if (action === "save-nas") return saveNasAndContinue();
     if (action === "refresh-domain") return refreshSeedDomain();
+    if (action === "refresh") return refreshCurrent();
     if (action === "back") return goBack();
     if (action === "fav-toggle") return toggleFavorite();
     if (action === "search-go") return doSearch();
     if (action === "clear-image-cache") {
       var n = clearImageCache();
       toast("이미지 캐시 " + n + "개 삭제", "ok");
+      return;
+    }
+    if (action === "clear-api-cache") {
+      var n = clearApiCache();
+      toast("API 캐시 " + n + "개 삭제", "ok");
       return;
     }
     if (action === "diag-tizen") {
@@ -1239,6 +1330,28 @@
     try { player.video.currentTime = Math.max(0, (player.video.currentTime || 0) + delta); } catch (_) {}
     showOverlayBriefly();
   }
+  function refreshCurrent() {
+    // 캐시 무시하고 현재 화면을 다시 불러온다.
+    if (currentScreen === "home") {
+      if (homeState.tab.indexOf("cat-") === 0) {
+        toast("새로 불러오는 중...", "ok");
+        loadCategoryFirst(true);
+      } else if (homeState.tab === "search") {
+        toast("새로 검색합니다...", "ok");
+        doSearch(true);
+      } else if (homeState.tab === "recent" || homeState.tab === "fav") {
+        // localStorage 기반 — 다시 그리기만 하면 됨
+        toast("새로 고침", "ok");
+        selectTab(homeState.tab);
+      }
+      return;
+    }
+    if (currentScreen === "detail" && detailState && detailState.item) {
+      toast("상세 다시 불러오는 중...", "ok");
+      openDetail(detailState.item, detailState.historyHit, true);
+    }
+  }
+
   function onColor(color) {
     if (currentScreen === "player") {
       if (color === "blue") cycleFitMode();
@@ -1250,6 +1363,8 @@
       return;
     }
     if (currentScreen === "home") {
+      // 파랑 키 = 현재 탭 강제 갱신 (모든 홈 탭 공통)
+      if (color === "blue") { refreshCurrent(); return; }
       // 검색 탭의 입력 클리어
       if (homeState.tab === "search") {
         if (color === "yellow") { inputSet("search-input", ""); return; }
@@ -1278,6 +1393,9 @@
           return;
         }
       }
+    }
+    if (currentScreen === "detail") {
+      if (color === "blue") { refreshCurrent(); return; }
     }
   }
 

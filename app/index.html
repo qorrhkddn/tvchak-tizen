@@ -24,6 +24,7 @@
         <button class="btn focusable" data-action="save-nas">저장하고 시작</button>
         <button class="btn btn-secondary focusable" data-action="refresh-domain">시드 도메인 자동 탐색</button>
         <button class="btn btn-secondary focusable" data-action="clear-image-cache">이미지 캐시 비우기</button>
+        <button class="btn btn-secondary focusable" data-action="clear-api-cache">API 응답 캐시 비우기</button>
         <button class="btn btn-secondary focusable" data-action="diag-tizen">Tizen API 진단</button>
       </div>
       <div id="settings-status" class="muted"></div>
@@ -36,7 +37,9 @@
         · <strong>TV 홈/Exit 키</strong>: 앱을 백그라운드로(메모리 유지) — 다시 들어오면 같은 화면.<br>
         · <strong>숫자 1~7</strong> (홈에서): 영화/드라마/예능/애니/검색/이어보기/즐겨찾기 바로 이동<br>
         · <strong>숫자 1~9, 0</strong> (상세에서): 해당 회차 바로 재생 (0 = 10화)<br>
-        · 플레이어: <strong>파랑 키</strong> 화면 맞춤 / <strong>◀▶</strong> 10초 시킹 / <strong>▶⏸</strong> 재생·정지<br>
+        · <strong>파랑 키</strong>: 현재 화면 새로고침 (캐시 무시) — 플레이어에선 화면 맞춤<br>
+        · 응답은 <strong>6시간 캐시</strong>됨 (Cloudflare 차단 회피). 새 결과 보려면 ↻ 또는 파랑 키.<br>
+        · 플레이어: <strong>◀▶</strong> 10초 시킹 / <strong>▶⏸</strong> 재생·정지<br>
         · 이어보기·즐겨찾기: <strong>빨강 키</strong> 항목 삭제 / <strong>노랑 키 ×2</strong> 전체 삭제
       </div>
     </section>
@@ -56,6 +59,7 @@
           <div class="spacer"></div>
           <div class="seed-info" id="app-version">v?</div>
           <div class="seed-info" id="seed-info"></div>
+          <div class="tab focusable" data-action="refresh" title="새로고침 (파란 키)">↻</div>
           <div class="tab focusable" data-tab="settings" title="설정">⚙</div>
         </nav>
       </header>

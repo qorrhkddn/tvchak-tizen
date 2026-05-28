@@ -911,17 +911,9 @@
     el.click();
   }
 
-  // ---------- TizenBrew 메인 메뉴로 돌아가기 ----------
-  // TizenBrew는 같은 webview 안에서 location.href로 모듈 페이지를 띄운다.
-  // 따라서 history.back()이 우리 진입 직전 페이지(TizenBrew 메뉴)로 데려간다.
-  // tizen.application.exit/hide는 외부 origin 모듈에서는 사실상 no-op이다
-  // (Jellyfin-Tizen의 tizen-adapter.js에 "cannot do anything about it"로 주석되어 있음).
-  function backToTizenBrew() {
-    try {
-      if (history.length > 1) { history.back(); return true; }
-    } catch (_) {}
-    return false;
-  }
+  // 모듈 webview에서 직접 종료/이동 API를 부르지 않는다.
+  // detail/player에서만 우리가 화면을 처리하고, home 탭에서 back을 누를 때는
+  // preventDefault를 빼서 TizenBrew/webview의 default 처리(메뉴 복귀)에 그대로 맡긴다.
 
   // ---------- 키 이벤트 ----------
   var lastBackAt = 0;
@@ -1023,9 +1015,9 @@
           if (activeTab) { setFocus(activeTab); return true; }
         }
       }
-      // 탭에 포커스 있음 → TizenBrew 메뉴로 복귀(history.back).
-      // 실패하면 default 동작에 양보.
-      return backToTizenBrew();
+      // 탭에 포커스 있음 → 우리는 처리하지 않고 default에 양보(false).
+      // TizenBrew/webview가 알아서 메뉴로 돌려보낸다.
+      return false;
     }
 
     // detail / player / settings(NAS 설정 완료) → 한 단계 뒤로

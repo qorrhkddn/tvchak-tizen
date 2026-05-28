@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "0.9.3";
+  var APP_VERSION = "0.9.4";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -40,11 +40,13 @@
 
   function _isCacheablePath(path) {
     if (!path) return false;
-    // domain/healthz/diag는 의미 없음. /api/extract는 사용자 요청대로 캐시 포함
-    // (스트림 URL이 만료될 가능성은 있지만 재생 안 되면 ↻ 갱신 가능).
     if (path.indexOf("/api/domain") === 0) return false;
     if (path.indexOf("/healthz") === 0) return false;
     if (path.indexOf("/api/diag") === 0) return false;
+    // /api/extract 는 한때 캐시 대상이었지만, BunnyCDN이 token-signed URL을
+    // 발급하고 짧은 시간(보통 수십분) 후 무효화시키므로 캐시된 video_url 로
+    // 시간 후 재생하면 BunnyCDN이 404. 매번 fresh extract하도록 제외.
+    if (path.indexOf("/api/extract") === 0) return false;
     return path.indexOf("/api/") === 0;
   }
 

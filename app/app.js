@@ -1125,9 +1125,18 @@
           if (activeTab) { setFocus(activeTab); return true; }
         }
       }
-      // 탭에 포커스 있음 → 우리는 처리하지 않고 default에 양보(false).
-      // TizenBrew/webview가 알아서 메뉴로 돌려보낸다.
-      return false;
+      // 탭에 포커스 있음 → 가능하면 앱을 백그라운드로(suspend), 안 되면 default 양보.
+      // hide()는 외부 origin 모듈에서는 대체로 no-op이지만, 시도해도 잃을 건 없음.
+      // 성공 케이스(메모리 유지된 채 hide)와 실패 시 default 동작 모두를 노린다.
+      try {
+        if (typeof tizen !== "undefined"
+            && tizen.application
+            && tizen.application.getCurrentApplication) {
+          var app = tizen.application.getCurrentApplication();
+          if (typeof app.hide === "function") app.hide();
+        }
+      } catch (_) {}
+      return false;  // preventDefault 안 함 — default(메뉴 복귀)도 백업으로 동작
     }
 
     // detail / player / settings(NAS 설정 완료) → 한 단계 뒤로

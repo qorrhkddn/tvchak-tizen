@@ -31,26 +31,60 @@
     get: function (k, def) {
       try {
         var v = localStorage.getItem(k);
-        return v == null ? def : JSON.parse(v);
-      } catch (e) { return def; }
+        if (v == null) return def;
+        return JSON.parse(v);
+      } catch (e) {
+        try { localStorage.removeItem(k); } catch (_) {}
+        return def;
+      }
     },
     set: function (k, v) {
-      try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {}
+      try {
+        localStorage.setItem(k, JSON.stringify(v));
+        return true;
+      } catch (e) {
+        // QuotaExceededError 등 — history는 자동 축소 후 재시도
+        if (k === "tvchak.history" && Array.isArray(v) && v.length > 10) {
+          try {
+            var trimmed = v.slice(0, Math.floor(v.length / 2));
+            localStorage.setItem(k, JSON.stringify(trimmed));
+            try { showToast && toast("저장 공간 부족: 오래된 시청기록 일부 삭제", "danger"); } catch(_){}
+            return true;
+          } catch (_) {}
+        }
+        return false;
+      }
     },
   };
+
+  // 응답에 박힌 NAS prefix를 제거해서 NAS 주소 바뀌어도 깨지지 않게.
+  function stripNasPrefix(url) {
+    if (!url) return url;
+    var base = nasUrl();
+    if (base && url.indexOf(base) === 0) return url.slice(base.length);
+    // 일반적인 http://...:port/proxy?... 형태도 안전하게 path만 잘라냄
+    var m = url.match(/^https?:\/\/[^\/]+(\/.*)$/);
+    return m ? m[1] : url;
+  }
+  function resolveNasUrl(pathOrUrl) {
+    if (!pathOrUrl) return "";
+    if (/^https?:\/\//.test(pathOrUrl)) return pathOrUrl;
+    return (nasUrl() || "").replace(/\/$/, "") + pathOrUrl;
+  }
   var KEYS = {
     NAS: "tvchak.nasUrl",
     HISTORY: "tvchak.history",
     FAVORITES: "tvchak.favorites",
     FIT_MODE: "tvchak.fitMode",
+    LAST_TAB: "tvchak.lastTab",
   };
 
   var FIT_MODES = ["contain", "cover", "fill", "none"];
   var FIT_NAMES = {
-    contain: "맞춤(기본)",
-    cover: "꽉 채움(잘림)",
-    fill: "왜곡 채움",
-    none: "원본 크기"
+    contain: "맞춤 (비율 유지)",
+    cover: "꽉 채움 (잘림)",
+    fill: "늘려 채움 (왜곡)",
+    none: "원본 비율 (작게)"
   };
 
   function nasUrl() { return STORE.get(KEYS.NAS, ""); }
@@ -119,7 +153,7 @@
     return false;
   }
 
-  function rebuildFocus(container) {
+  function rebuildFocus(container, preferredEl) {
     focus.items = [];
     focus.rowMap = {};
     var nodes = container.querySelectorAll(".focusable");
@@ -130,7 +164,12 @@
       focus.items.push({ el: el, row: row, col: col });
       (focus.rowMap[row] = focus.rowMap[row] || []).push(col);
     });
-    // 기본 포커스 — 이미 포커스된 게 여전히 유효하면 유지
+    // 우선 타겟이 지정됐고 그 요소가 유효하면 그쪽으로
+    if (preferredEl && focus.items.some(function (i) { return i.el === preferredEl; })) {
+      setFocus(preferredEl);
+      return;
+    }
+    // 이미 포커스된 게 여전히 유효하면 유지
     if (focus.current && focus.items.some(function (i) { return i.el === focus.current; })) {
       return;
     }
@@ -181,15 +220,49 @@
   }
 
   // ---------- API 호출 ----------
+  var API_TIMEOUT_MS = 15000;
+  var apiSeq = 0;
+
   function apiGet(path) {
     var base = nasUrl();
     if (!base) return Promise.reject(new Error("NAS 주소가 설정되지 않았습니다."));
-    return fetch(base.replace(/\/$/, "") + path)
+
+    var controller = null;
+    var fetchOpts = {};
+    if (typeof AbortController !== "undefined") {
+      controller = new AbortController();
+      fetchOpts.signal = controller.signal;
+    }
+    var timer = setTimeout(function () {
+      if (controller) try { controller.abort(); } catch (_) {}
+    }, API_TIMEOUT_MS);
+
+    return fetch(base.replace(/\/$/, "") + path, fetchOpts)
       .then(function (r) {
-        if (!r.ok) return r.json().then(function (j) { throw new Error(j.error || ("HTTP " + r.status)); });
-        return r.json();
-      });
+        if (!r.ok) {
+          return r.text().then(function (t) {
+            var msg = "HTTP " + r.status;
+            try { var j = JSON.parse(t); if (j && j.error) msg = j.error; }
+            catch (_) { if (t) msg += " — " + t.slice(0, 120); }
+            throw new Error(msg);
+          });
+        }
+        return r.text().then(function (t) {
+          try { return JSON.parse(t); }
+          catch (e) { throw new Error("JSON 파싱 실패: " + t.slice(0, 80)); }
+        });
+      })
+      .catch(function (e) {
+        if (e && e.name === "AbortError") throw new Error("응답 시간 초과 (" + (API_TIMEOUT_MS/1000) + "s)");
+        throw e;
+      })
+      .then(function (v) { clearTimeout(timer); return v; },
+            function (e) { clearTimeout(timer); throw e; });
   }
+
+  // 탭/요청 race 방지: 호출 시점의 token을 받아두고 응답 시 일치 확인.
+  function newApiToken() { return ++apiSeq; }
+  function isApiTokenLatest(t) { return t === apiSeq; }
 
   // ---------- 텍스트 입력 (Tizen native IME) ----------
   // 진짜 <input> 요소를 쓰므로 포커스 시 Tizen OSD 키보드가 자동으로 뜬다.
@@ -212,7 +285,9 @@
   // ---------- 설정 화면 ----------
   function renderSettings() {
     var nasInput = document.getElementById("nas-input");
-    nasInput.value = nasUrl() || "http://192.168.1.230:7777";
+    // 저장된 주소가 있을 때만 채우고, 첫 사용자는 placeholder만 보여서
+    // 무심코 더미 IP를 저장하지 않게 한다.
+    nasInput.value = nasUrl();
     nasInput.dataset.row = "0"; nasInput.dataset.col = "0";
 
     var actions = document.querySelectorAll("#screen-settings .settings-actions .focusable");
@@ -265,7 +340,11 @@
 
   // ---------- 홈 ----------
   // 기본 탭 = 이어보기 (메인 카테고리에 가끔 선정적 썸네일이 섞여서)
-  var homeState = { tab: "recent", category: "1" };
+  // 이전 세션의 마지막 탭이 있으면 그 탭으로 시작
+  var SAFE_TABS = ["cat-1","cat-2","cat-3","cat-4","search","recent","fav"];
+  var initialTab = STORE.get(KEYS.LAST_TAB, "recent");
+  if (SAFE_TABS.indexOf(initialTab) === -1) initialTab = "recent";
+  var homeState = { tab: initialTab, category: "1" };
   var pendingClearAt = 0;  // 노란색 키 두 번으로 전체 삭제 확정용
 
   // 무한 로드 상태 (카테고리 탭 전용)
@@ -286,15 +365,25 @@
 
   function selectTab(name) {
     homeState.tab = name;
+    if (SAFE_TABS.indexOf(name) >= 0) STORE.set(KEYS.LAST_TAB, name);
     document.querySelectorAll("#tabs .tab").forEach(function (t) {
       t.classList.toggle("active", t.dataset.tab === name);
     });
     document.getElementById("search-area").classList.toggle("hidden", name !== "search");
 
+    // 탭 변경 → 진행 중 fetch 무효화 + 자동 로드 컨텍스트 초기화
+    pendingClearAt = 0;
+    if (name.indexOf("cat-") !== 0) {
+      listState = { mode: null, cat: null, page: 1,
+                    hasMore: false, loading: false, itemCount: 0,
+                    token: newApiToken() };
+    }
+
     if (name.indexOf("cat-") === 0) {
       homeState.category = name.split("-")[1];
       listState = { mode: "cat", cat: homeState.category, page: 1,
-                    hasMore: false, loading: false, itemCount: 0 };
+                    hasMore: false, loading: false, itemCount: 0,
+                    token: newApiToken() };
       loadCategoryFirst();
     } else if (name === "search") {
       renderSearchTab();
@@ -363,14 +452,18 @@
     document.getElementById("grid").innerHTML = "";
     listState.itemCount = 0;
     listState.loading = true;
+    listState.token = newApiToken();
+    var token = listState.token;
     apiGet("/api/mainpage?cat=" + listState.cat + "&page=" + listState.page)
       .then(function (j) {
+        if (token !== listState.token) return;   // 사이에 탭 바뀌면 무시
         listState.loading = false;
         var items = j.items || [];
-        listState.hasMore = items.length >= 12;  // 한 페이지 가득 차면 더 있을 거라 가정
+        listState.hasMore = items.length >= 12;
         renderGrid(items, openDetail);
       })
       .catch(function (e) {
+        if (token !== listState.token) return;
         listState.loading = false;
         document.getElementById("grid-status").textContent = "실패: " + e.message;
       });
@@ -380,10 +473,12 @@
     if (listState.mode !== "cat" || !listState.hasMore || listState.loading) return;
     listState.loading = true;
     listState.page += 1;
+    var token = listState.token;  // 동일 토큰 유지 — 같은 탭의 연속 요청
     document.getElementById("grid-status").textContent =
       "더 불러오는 중... (페이지 " + listState.page + ")";
     apiGet("/api/mainpage?cat=" + listState.cat + "&page=" + listState.page)
       .then(function (j) {
+        if (token !== listState.token) return;
         listState.loading = false;
         var items = j.items || [];
         if (!items.length) {
@@ -397,8 +492,9 @@
           listState.hasMore ? "" : "마지막 페이지입니다.";
       })
       .catch(function (e) {
+        if (token !== listState.token) return;
         listState.loading = false;
-        listState.page -= 1;  // 실패 시 페이지 롤백
+        listState.page -= 1;
         document.getElementById("grid-status").textContent = "추가 로드 실패: " + e.message;
       });
   }
@@ -428,7 +524,12 @@
   function renderRecentTab() {
     var items = STORE.get(KEYS.HISTORY, []).slice().reverse().slice(0, 60);
     var mapped = items.map(function (h) {
-      return { title: h.title, url: h.detail_url, poster_proxy_url: h.poster_proxy_url, poster: h.poster };
+      return {
+        title: h.title,
+        url: h.detail_url,
+        poster_proxy_url: resolveNasUrl(h.poster_proxy_path || h.poster_proxy_url),
+        poster: h.poster
+      };
     });
     renderGrid(mapped, function (it) {
       var hit = items.find(function (h) { return h.detail_url === it.url; });
@@ -447,7 +548,12 @@
   function renderFavTab() {
     var favs = STORE.get(KEYS.FAVORITES, []);
     var mapped = favs.map(function (f) {
-      return { title: f.title, url: f.detail_url, poster_proxy_url: f.poster_proxy_url, poster: f.poster };
+      return {
+        title: f.title,
+        url: f.detail_url,
+        poster_proxy_url: resolveNasUrl(f.poster_proxy_path || f.poster_proxy_url),
+        poster: f.poster
+      };
     });
     renderGrid(mapped, openDetail, {
       emptyHint: "즐겨찾기에 추가된 항목이 없습니다. 상세 화면에서 '즐겨찾기 추가'를 눌러주세요.",
@@ -490,6 +596,15 @@
     document.getElementById("episode-list").innerHTML = "";
     document.getElementById("detail-resume-info").textContent = "";
 
+    // fetch 응답 오기 전이라도 detail 화면의 포커스를 잡아둔다.
+    // (안 그러면 이전 home 카드 ref가 focus.current에 남아서 키 입력이 안 먹힘)
+    document.querySelector('#screen-detail [data-action="back"]').dataset.row = "0";
+    document.querySelector('#screen-detail [data-action="back"]').dataset.col = "0";
+    document.getElementById("fav-btn").dataset.row = "1";
+    document.getElementById("fav-btn").dataset.col = "0";
+    focus.current = null;
+    rebuildFocus(screens.detail);
+
     apiGet("/api/detail?u=" + encodeURIComponent(item.url)).then(function (j) {
       detailState.info = j;
       document.getElementById("detail-title").textContent = j.title || item.title || "";
@@ -526,6 +641,7 @@
         '<div class="ep-num">' + ep.episode + '화</div>' +
         '<div class="ep-name">' + escapeHtml(ep.name || "") + '</div>' +
         (pct > 0 ? '<div class="ep-progress"><div class="ep-progress-bar" style="width:' + pct + '%"></div></div>' : '');
+      card._epPlayUrl = ep.play_url;
       card.addEventListener("click", function () { playEpisode(ep); });
       list.appendChild(card);
     });
@@ -535,7 +651,18 @@
     document.querySelector('#screen-detail [data-action="back"]').dataset.col = "0";
     document.getElementById("fav-btn").dataset.row = "1";
     document.getElementById("fav-btn").dataset.col = "0";
-    rebuildFocus(screens.detail);
+    // 첫 진입 시 자동으로 첫 에피소드(이어보기가 있으면 그쪽)로 포커스
+    var preferred = null;
+    var lastUrl = detailState.historyHit && detailState.historyHit.lastEpisode
+                  ? detailState.historyHit.lastEpisode.play_url : null;
+    if (lastUrl) {
+      preferred = Array.prototype.find.call(
+        list.querySelectorAll(".ep-card"),
+        function (c) { return c._epPlayUrl === lastUrl; }
+      );
+    }
+    if (!preferred) preferred = list.querySelector(".ep-card");
+    rebuildFocus(screens.detail, preferred);
   }
 
   function updateFavButton() {
@@ -549,13 +676,15 @@
     var idx = favs.findIndex(function (f) { return f.detail_url === detailState.item.url; });
     if (idx >= 0) {
       favs.splice(idx, 1);
-      toast("즐겨찾기 해제");
+      toast("즐겨찾기 해제", "ok");
     } else {
+      var info = detailState.info, it = detailState.item;
       favs.push({
-        title: detailState.info ? detailState.info.title : detailState.item.title,
-        detail_url: detailState.item.url,
-        poster: detailState.info ? detailState.info.poster : detailState.item.poster,
-        poster_proxy_url: detailState.info ? detailState.info.poster_proxy_url : detailState.item.poster_proxy_url,
+        title: (info && info.title) || it.title,
+        detail_url: it.url,
+        poster: (info && info.poster) || it.poster,
+        // NAS 주소 변경에 대비해 path만 저장
+        poster_proxy_path: stripNasPrefix((info && info.poster_proxy_url) || it.poster_proxy_url),
       });
       toast("즐겨찾기 추가", "ok");
     }
@@ -613,19 +742,25 @@
 
     apiGet("/api/extract?u=" + encodeURIComponent(ep.play_url)).then(function (j) {
       if (j.error) throw new Error(j.error);
-      var src = j.proxy_url;
+      var src = j.proxy_url || resolveNasUrl(j.proxy_path);
+      // 이전 시청 listener가 남아있을 경우 정리
+      if (player._resumeListener) {
+        try { player.video.removeEventListener("loadedmetadata", player._resumeListener); } catch(_){}
+        player._resumeListener = null;
+      }
       player.video.src = src;
 
-      // 이어보기 위치 적용
       var history = STORE.get(KEYS.HISTORY, []);
       var hh = history.find(function (h) { return h.detail_url === detailState.item.url; });
       if (hh && hh.episodes && hh.episodes[ep.play_url]) {
         var pos = hh.episodes[ep.play_url].position;
         if (pos > 5) {
-          player.video.addEventListener("loadedmetadata", function once() {
+          player._resumeListener = function () {
             try { player.video.currentTime = pos; } catch (e) {}
-            player.video.removeEventListener("loadedmetadata", once);
-          });
+            player.video.removeEventListener("loadedmetadata", player._resumeListener);
+            player._resumeListener = null;
+          };
+          player.video.addEventListener("loadedmetadata", player._resumeListener, { once: true });
         }
       }
 
@@ -641,9 +776,13 @@
   function stopPlayback() {
     if (player.saveTimer) { clearInterval(player.saveTimer); player.saveTimer = null; }
     persistHistory();
+    if (player._resumeListener) {
+      try { player.video.removeEventListener("loadedmetadata", player._resumeListener); } catch(_){}
+      player._resumeListener = null;
+    }
     try { player.video.pause(); } catch (_) {}
     player.video.removeAttribute("src");
-    player.video.load();
+    try { player.video.load(); } catch (_) {}
     player.currentEp = null;
   }
 
@@ -659,11 +798,12 @@
     if (!isFinite(pos) || pos < 1) return;
     var history = STORE.get(KEYS.HISTORY, []);
     var idx = history.findIndex(function (h) { return h.detail_url === detailState.item.url; });
+    var info = detailState.info, it = detailState.item;
     var entry = idx >= 0 ? history[idx] : {
-      detail_url: detailState.item.url,
-      title: detailState.info ? detailState.info.title : detailState.item.title,
-      poster: detailState.info ? detailState.info.poster : detailState.item.poster,
-      poster_proxy_url: detailState.info ? detailState.info.poster_proxy_url : detailState.item.poster_proxy_url,
+      detail_url: it.url,
+      title: (info && info.title) || it.title,
+      poster: (info && info.poster) || it.poster,
+      poster_proxy_path: stripNasPrefix((info && info.poster_proxy_url) || it.poster_proxy_url),
       episodes: {},
     };
     entry.episodes = entry.episodes || {};
@@ -707,15 +847,23 @@
   player.video.addEventListener("waiting", function () { player.loadingEl.classList.remove("hidden"); });
   player.video.addEventListener("error", function () { toast("재생 오류", "danger"); });
 
+  // 페이지 숨김/종료 시 마지막 위치 즉시 저장 (Tizen은 pagehide/visibilitychange 모두 발생)
+  function persistOnExit() { try { persistHistory(); } catch (_) {} }
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "hidden") persistOnExit();
+  });
+  window.addEventListener("pagehide", persistOnExit);
+  window.addEventListener("beforeunload", persistOnExit);
+
   // ---------- 화면 전환시 ----------
+  // 홈 화면으로 "처음 들어올 때"만 탭을 다시 그린다. detail/player에서 goBack으로
+  // 돌아온 경우엔 그리드 상태(스크롤·페이지·포커스)를 유지하는 게 자연스럽다.
   function onScreenEnter(name) {
     if (name === "settings") renderSettings();
     if (name === "home") {
-      // 진입 시 시드 도메인 표시
       apiGet("/api/domain").then(function (j) {
         document.getElementById("seed-info").textContent = j.seed_domain || "";
       }).catch(function () {});
-      selectTab(homeState.tab);
     }
   }
 
@@ -756,9 +904,10 @@
 
     // input 포커스 상태에선 IME에 키를 양보. 단 일부는 우리가 처리.
     if (inInput) {
-      if (k === 10009 || k === 27) {     // Return/Esc: IME 닫고 input 벗어남
+      if (k === 10009 || k === 27) {     // Return/Esc: IME 닫고 한 번에 뒤로까지
         active.blur();
         e.preventDefault();
+        onBack();
         return;
       }
       if (k === 13) {                    // Enter: 제출

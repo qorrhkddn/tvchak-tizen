@@ -139,8 +139,8 @@ html, body {
 .ep-card .ep-num { font-size: 16px; color: var(--muted); }
 .ep-card .ep-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ep-card .ep-progress {
-  height: 4px; background: var(--panel-2); border-radius: 2px; overflow: hidden;
-  margin-top: 4px;
+  height: 7px; background: var(--panel-2); border-radius: 3px; overflow: hidden;
+  margin-top: 6px;
 }
 .ep-card .ep-progress-bar { height: 100%; background: var(--accent); width: 0; }
 

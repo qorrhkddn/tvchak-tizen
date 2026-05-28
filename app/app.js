@@ -7,6 +7,10 @@
 (function () {
   "use strict";
 
+  // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
+  // 모듈이 들어왔는지 한눈에 확인 가능.
+  var APP_VERSION = "0.7.4";
+
   // ---------- TizenBrew TVInputDevice ----------
   function registerKeys() {
     try {
@@ -935,6 +939,13 @@
       apiGet("/api/domain").then(function (j) {
         document.getElementById("seed-info").textContent = j.seed_domain || "";
       }).catch(function () {});
+      // 서버 버전도 같이 받아 헤더에 표시
+      apiGet("/healthz").then(function (j) {
+        if (j && j.server_version) {
+          var verEl = document.getElementById("app-version");
+          if (verEl) verEl.textContent = "TV v" + APP_VERSION + " · srv v" + j.server_version;
+        }
+      }).catch(function () {});
       // 직전에 home에서 봤던 카드가 있으면 그쪽으로, 없으면 활성 탭으로
       var preferred = homeState.lastFocus
         && document.body.contains(homeState.lastFocus)
@@ -1289,6 +1300,13 @@
   }
 
   // ---------- 시작 ----------
+  // 버전을 화면에 노출 (헤더 + 설정 가이드)
+  try {
+    var verEl = document.getElementById("app-version");
+    if (verEl) verEl.textContent = "v" + APP_VERSION;
+    var verEl2 = document.getElementById("settings-version");
+    if (verEl2) verEl2.textContent = "v" + APP_VERSION;
+  } catch (_) {}
   registerKeys();
   if (nasUrl()) {
     enterHome();

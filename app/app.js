@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "0.9.4";
+  var APP_VERSION = "0.9.5";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -1494,6 +1494,7 @@
     version: APP_VERSION,
     loadCategoryMore: function () { try { loadCategoryMore(); } catch (_) {} },
     goBack: function () { try { goBack(); } catch (_) {} },
+    triggerColor: function (c) { try { onColor(c); } catch (_) {} },
     getListState: function () {
       return {
         mode: listState.mode,

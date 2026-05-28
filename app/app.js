@@ -57,28 +57,15 @@
     },
   };
 
-  // ---------- 이미지 캐시 (localStorage) ----------
-  // 같은 path를 한 번 더 그릴 때 NAS를 안 거치고 즉시 표시. NAS가 다운돼도
-  // 이어보기/즐겨찾기 그리드가 비지 않는다. 캐시는 작은 썸네일로 압축 저장.
-  var IMG_CACHE_PREFIX = "tvchak.img:";
-  var IMG_CACHE_W = 300;
-  var IMG_CACHE_QUALITY = 0.7;
+  // 카드 img element는 NAS에서 직접 받는다. 평소 NAS가 같은 LAN에서 동작하면
+  // 충분히 빠르고, NAS 다운 시점엔 어차피 비디오 재생도 불가능하므로 캐싱이 의미 없음.
+  function setCardImage(imgEl, _cacheKey, displayUrl /*, _originalUrl */) {
+    if (displayUrl) imgEl.src = displayUrl;
+  }
 
-  function cachedImage(path) {
-    if (!path) return null;
-    try { return localStorage.getItem(IMG_CACHE_PREFIX + path); }
-    catch (e) { return null; }
-  }
-  function rememberImage(path, dataUri) {
-    if (!path || !dataUri) return;
-    try { localStorage.setItem(IMG_CACHE_PREFIX + path, dataUri); }
-    catch (e) {
-      // quota 초과 — 캐시 절반 정리 후 재시도
-      pruneImageCache(0.5);
-      try { localStorage.setItem(IMG_CACHE_PREFIX + path, dataUri); } catch (_) {}
-    }
-  }
-  function listImageCacheKeys() {
+  // 한 번 캐시 저장된 적이 있는 사용자를 위해 기존 캐시 키만 청소.
+  function clearImageCache() {
+    var IMG_CACHE_PREFIX = "tvchak.img:";
     var keys = [];
     try {
       for (var i = 0; i < localStorage.length; i++) {
@@ -86,76 +73,8 @@
         if (k && k.indexOf(IMG_CACHE_PREFIX) === 0) keys.push(k);
       }
     } catch (_) {}
-    return keys;
-  }
-  function pruneImageCache(ratio) {
-    var keys = listImageCacheKeys();
-    var n = Math.floor(keys.length * ratio);
-    for (var i = 0; i < n; i++) {
-      try { localStorage.removeItem(keys[i]); } catch (_) {}
-    }
-  }
-  function clearImageCache() {
-    var keys = listImageCacheKeys();
     keys.forEach(function (k) { try { localStorage.removeItem(k); } catch (_) {} });
     return keys.length;
-  }
-
-  // 같은 detail_url을 가진 history/favorites 항목의 poster_proxy_path를 현재 카드의 path로 맞춤.
-  // 이러면 사용자가 카테고리/검색에서 카드를 보는 것만으로도 이어보기 thumb 키가 정정됨.
-  function syncStoredPath(detailUrl, path) {
-    if (!detailUrl || !path) return;
-    var dirty = false;
-    var hist = STORE.get("tvchak.history", []);
-    for (var i = 0; i < hist.length; i++) {
-      if (hist[i] && hist[i].detail_url === detailUrl && hist[i].poster_proxy_path !== path) {
-        hist[i].poster_proxy_path = path;
-        dirty = true;
-      }
-    }
-    if (dirty) STORE.set("tvchak.history", hist);
-
-    dirty = false;
-    var favs = STORE.get("tvchak.favorites", []);
-    for (var j = 0; j < favs.length; j++) {
-      if (favs[j] && favs[j].detail_url === detailUrl && favs[j].poster_proxy_path !== path) {
-        favs[j].poster_proxy_path = path;
-        dirty = true;
-      }
-    }
-    if (dirty) STORE.set("tvchak.favorites", favs);
-  }
-
-  // 카드 img element 채우기.
-  // 1) 캐시 있으면 즉시 표시.
-  // 2) 없으면 NAS 원본 URL을 표시하면서 동시에 백엔드 /api/thumb에 요청 →
-  //    JSON으로 받은 base64 dataURI를 localStorage에 저장.
-  //    (client-side canvas/CORS 변수 제거)
-  function setCardImage(imgEl, cacheKey, displayUrl, originalUrl) {
-    if (cacheKey) {
-      var cached = cachedImage(cacheKey);
-      if (cached) {
-        imgEl.src = cached;
-        return;
-      }
-    }
-    if (displayUrl) imgEl.src = displayUrl;
-    if (!cacheKey) return;
-
-    // 백엔드 /api/thumb 호출 (원본 URL이 있으면 그것, 없으면 그냥 NAS 표시 URL을 fallback)
-    var base = nasUrl();
-    if (!base) return;
-    var thumbSrc = originalUrl || displayUrl;
-    if (!thumbSrc) return;
-    var thumbUrl = base.replace(/\/$/, "") + "/api/thumb?u=" + encodeURIComponent(thumbSrc);
-    if (window.fetch) {
-      fetch(thumbUrl).then(function (r) {
-        if (!r.ok) throw new Error("thumb " + r.status);
-        return r.json();
-      }).then(function (j) {
-        if (j && j.data_uri) rememberImage(cacheKey, j.data_uri);
-      }).catch(function () { /* 캐시 못 했음. 다음에 다시 시도 */ });
-    }
   }
 
   // 응답에 박힌 NAS prefix를 제거해서 NAS 주소 바뀌어도 깨지지 않게.
@@ -555,10 +474,6 @@
       setCardImage(img, cacheKey, posterUrl, it.poster);
     }
     card.appendChild(imgWrap);
-    // 카드를 그릴 때마다 history/favorites의 path도 카드 path로 정정해둠 (v0.5.0 잘못된 path 자동 마이그레이션)
-    if (it.url && it.poster_proxy_url) {
-      syncStoredPath(it.url, stripNasPrefix(it.poster_proxy_url));
-    }
 
     var titleEl = document.createElement("div");
     titleEl.className = "card-title";

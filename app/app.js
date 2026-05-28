@@ -345,12 +345,10 @@
   }
 
   // ---------- 홈 ----------
-  // 기본 탭 = 이어보기 (메인 카테고리에 가끔 선정적 썸네일이 섞여서)
-  // 이전 세션의 마지막 탭이 있으면 그 탭으로 시작
+  // 첫 화면은 항상 이어보기 — 메인 카테고리에 가끔 선정적 썸네일이 섞이는 걸
+  // 방지하기 위해 사용자 의도된 "안전한" 진입점.
   var SAFE_TABS = ["cat-1","cat-2","cat-3","cat-4","search","recent","fav"];
-  var initialTab = STORE.get(KEYS.LAST_TAB, "recent");
-  if (SAFE_TABS.indexOf(initialTab) === -1) initialTab = "recent";
-  var homeState = { tab: initialTab, category: "1" };
+  var homeState = { tab: "recent", category: "1" };
   var pendingClearAt = 0;  // 노란색 키 두 번으로 전체 삭제 확정용
 
   // 무한 로드 상태 (카테고리 탭 전용)
@@ -371,7 +369,6 @@
 
   function selectTab(name) {
     homeState.tab = name;
-    if (SAFE_TABS.indexOf(name) >= 0) STORE.set(KEYS.LAST_TAB, name);
     document.querySelectorAll("#tabs .tab").forEach(function (t) {
       t.classList.toggle("active", t.dataset.tab === name);
     });

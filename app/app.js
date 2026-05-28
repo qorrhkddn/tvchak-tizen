@@ -57,6 +57,79 @@
     },
   };
 
+  // ---------- 이미지 캐시 (localStorage) ----------
+  // 같은 path를 한 번 더 그릴 때 NAS를 안 거치고 즉시 표시. NAS가 다운돼도
+  // 이어보기/즐겨찾기 그리드가 비지 않는다. 캐시는 작은 썸네일로 압축 저장.
+  var IMG_CACHE_PREFIX = "tvchak.img:";
+  var IMG_CACHE_W = 300;
+  var IMG_CACHE_QUALITY = 0.7;
+
+  function cachedImage(path) {
+    if (!path) return null;
+    try { return localStorage.getItem(IMG_CACHE_PREFIX + path); }
+    catch (e) { return null; }
+  }
+  function rememberImage(path, dataUri) {
+    if (!path || !dataUri) return;
+    try { localStorage.setItem(IMG_CACHE_PREFIX + path, dataUri); }
+    catch (e) {
+      // quota 초과 — 캐시 절반 정리 후 재시도
+      pruneImageCache(0.5);
+      try { localStorage.setItem(IMG_CACHE_PREFIX + path, dataUri); } catch (_) {}
+    }
+  }
+  function listImageCacheKeys() {
+    var keys = [];
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        if (k && k.indexOf(IMG_CACHE_PREFIX) === 0) keys.push(k);
+      }
+    } catch (_) {}
+    return keys;
+  }
+  function pruneImageCache(ratio) {
+    var keys = listImageCacheKeys();
+    var n = Math.floor(keys.length * ratio);
+    for (var i = 0; i < n; i++) {
+      try { localStorage.removeItem(keys[i]); } catch (_) {}
+    }
+  }
+  function clearImageCache() {
+    var keys = listImageCacheKeys();
+    keys.forEach(function (k) { try { localStorage.removeItem(k); } catch (_) {} });
+    return keys.length;
+  }
+
+  // 카드 img element 채우기. 캐시 있으면 즉시, 없으면 원본 로드 후 백그라운드 캐시.
+  function setCardImage(imgEl, cacheKey, url) {
+    if (cacheKey) {
+      var cached = cachedImage(cacheKey);
+      if (cached) {
+        imgEl.src = cached;
+        return;
+      }
+    }
+    if (!url) return;
+    imgEl.src = url;
+    if (!cacheKey) return;
+    var probe = new Image();
+    probe.crossOrigin = "anonymous";
+    probe.onload = function () {
+      try {
+        var canvas = document.createElement("canvas");
+        var ratio = probe.naturalHeight / probe.naturalWidth;
+        canvas.width = IMG_CACHE_W;
+        canvas.height = Math.round(IMG_CACHE_W * ratio);
+        var ctx = canvas.getContext("2d");
+        ctx.drawImage(probe, 0, 0, canvas.width, canvas.height);
+        rememberImage(cacheKey, canvas.toDataURL("image/jpeg", IMG_CACHE_QUALITY));
+      } catch (_) { /* CORS 등으로 tainted면 무시 */ }
+    };
+    probe.onerror = function () { /* 캐시 못 함. UI에는 영향 없음 */ };
+    probe.src = url;
+  }
+
   // 응답에 박힌 NAS prefix를 제거해서 NAS 주소 바뀌어도 깨지지 않게.
   function stripNasPrefix(url) {
     if (!url) return url;
@@ -297,8 +370,10 @@
     nasInput.dataset.row = "0"; nasInput.dataset.col = "0";
 
     var actions = document.querySelectorAll("#screen-settings .settings-actions .focusable");
-    actions[0].dataset.row = "1"; actions[0].dataset.col = "0";
-    actions[1].dataset.row = "1"; actions[1].dataset.col = "1";
+    for (var i = 0; i < actions.length; i++) {
+      actions[i].dataset.row = "1";
+      actions[i].dataset.col = String(i);
+    }
 
     document.getElementById("settings-status").textContent = "";
     focus.current = null;
@@ -436,12 +511,27 @@
     card.className = "card focusable";
     card.dataset.row = String(2 + Math.floor(i / 6));
     card.dataset.col = String(i % 6);
+
+    var imgWrap = document.createElement("div");
+    imgWrap.className = "card-img-wrap";
     var posterUrl = it.poster_proxy_url || it.poster || "";
-    card.innerHTML =
-      '<div class="card-img-wrap">' +
-        (posterUrl ? '<img src="' + posterUrl + '" loading="lazy" onerror="this.style.display=\'none\'">' : '') +
-      '</div>' +
-      '<div class="card-title">' + escapeHtml(it.title || "") + '</div>';
+    // 캐시 키는 NAS prefix 제거한 path. recent/fav 항목은 이미 path를 들고 있다.
+    var cacheKey = it.poster_proxy_path
+      || (it.poster_proxy_url ? stripNasPrefix(it.poster_proxy_url) : (it.poster || ""));
+    if (posterUrl || cacheKey) {
+      var img = document.createElement("img");
+      img.loading = "lazy";
+      img.onerror = function () { this.style.display = "none"; };
+      imgWrap.appendChild(img);
+      setCardImage(img, cacheKey, posterUrl);
+    }
+    card.appendChild(imgWrap);
+
+    var titleEl = document.createElement("div");
+    titleEl.className = "card-title";
+    titleEl.textContent = it.title || "";
+    card.appendChild(titleEl);
+
     card.addEventListener("click", function () { onClickItem(it); });
     if (opts && typeof opts.onDelete === "function") {
       card._deleteHandler = function () { opts.onDelete(it); };
@@ -898,6 +988,11 @@
     if (action === "back") return goBack();
     if (action === "fav-toggle") return toggleFavorite();
     if (action === "search-go") return doSearch();
+    if (action === "clear-image-cache") {
+      var n = clearImageCache();
+      toast("이미지 캐시 " + n + "개 삭제", "ok");
+      return;
+    }
   }
 
   function clickFocusable() {

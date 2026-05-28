@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "0.9.0";
+  var APP_VERSION = "0.9.2";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -1475,4 +1475,23 @@
   } else {
     show("settings", false);
   }
+
+  // 외부 보조 UI(예: tvchak-proxy의 /web/ 모바일 overlay)에서 호출하기 위한
+  // 좁은 entry point. closure 안에 있는 핵심 동작들을 위임 호출만 노출한다.
+  // TV(TizenBrew)에서는 사용되지 않음 — 모바일/PC 브라우저 전용 보조.
+  window.TVChakAPI = {
+    version: APP_VERSION,
+    loadCategoryMore: function () { try { loadCategoryMore(); } catch (_) {} },
+    goBack: function () { try { goBack(); } catch (_) {} },
+    getListState: function () {
+      return {
+        mode: listState.mode,
+        cat: listState.cat,
+        page: listState.page,
+        hasMore: listState.hasMore,
+        loading: listState.loading,
+      };
+    },
+    currentScreen: function () { return currentScreen; },
+  };
 })();

@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "1.0.22";
+  var APP_VERSION = "1.0.23";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -1054,9 +1054,14 @@
   var detailState = null;
 
   function openDetail(item, historyHit, bypass) {
-    // 돌아왔을 때 같은 카드로 포커스 회복할 수 있도록 직전 위치 기록
+    // 돌아왔을 때 같은 카드로 포커스 회복할 수 있도록 직전 위치 기록.
+    // setFocus 의 scrollIntoView 가 center 로 잡아도 카테고리 grid 처럼 스크롤
+    // 이 깊으면 정확히 같은 시각 위치가 안 잡힘. scrollTop 도 함께 저장.
     if (currentScreen === "home" && focus.current) {
       homeState.lastFocus = focus.current;
+      var hc = document.querySelector("#screen-home .content");
+      homeState.lastScrollTop = hc ? hc.scrollTop : 0;
+      homeState.lastWindowScrollY = window.scrollY || 0;
     }
     detailState = { item: item, info: null, historyHit: historyHit || findHistory(item.url) };
     show("detail");
@@ -1600,6 +1605,18 @@
         : document.querySelector("#tabs .tab.active");
       focus.current = null;
       rebuildFocus(screens.home, preferred);
+      // rebuildFocus 의 setFocus 가 scrollIntoView 로 viewport 를 재배치하는데,
+      // 카테고리 grid 처럼 스크롤 깊은 화면에선 사용자가 보던 위치와 어긋남.
+      // 저장해둔 scrollTop 으로 강제 복원 (next tick).
+      setTimeout(function () {
+        var hc = document.querySelector("#screen-home .content");
+        if (hc && typeof homeState.lastScrollTop === "number") {
+          hc.scrollTop = homeState.lastScrollTop;
+        }
+        if (typeof homeState.lastWindowScrollY === "number") {
+          window.scrollTo(0, homeState.lastWindowScrollY);
+        }
+      }, 0);
     }
   }
 

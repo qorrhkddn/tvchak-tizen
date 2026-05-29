@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "1.0.17";
+  var APP_VERSION = "1.0.18";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -1299,10 +1299,11 @@
 
     apiGet("/api/extract?u=" + encodeURIComponent(ep.play_url), { bypass: bypass }).then(function (j) {
       if (j.error) throw new Error(j.error);
-      // 1차: 직접 URL 시도 — client 가 m3u8/mp4 호스트에 직접 fetch.
-      // 호스트의 cloaking 정책에 따라 proxy 경유보다 직접이 통과되는 경우 있음.
-      // 실패하면 video error handler 가 proxy_url 로 자동 swap.
-      var src = j.video_url || j.proxy_url || resolveNasUrl(j.proxy_path);
+      // 1차: NAS proxy 경유 — 대부분의 호스트(wiselife.blog, BunnyCDN 등)는
+      // proxy 의 referer 박힘이 anti-hotlink 통과에 필요. 실패하는 일부 케이스
+      // (smartnote 의 anti-scrape 등)는 사용자가 player overlay 의 "다른 경로"
+      // 버튼을 눌러 직접 URL 로 swap.
+      var src = j.proxy_url || resolveNasUrl(j.proxy_path);
       // 이전 시청 listener가 남아있을 경우 정리
       if (player._resumeListener) {
         try { player.video.removeEventListener("loadedmetadata", player._resumeListener); } catch(_){}
@@ -1313,7 +1314,7 @@
       // overlay 의 "다른 경로로 다시 시도" 버튼으로 직접 swap.
       player.currentExtract = j;
       var info = document.getElementById("swap-src-info");
-      if (info) info.textContent = "→ 직접 URL";
+      if (info) info.textContent = "→ NAS proxy";
 
       var history = STORE.get(KEYS.HISTORY, []);
       var hh = history.find(function (h) { return h.detail_url === detailState.item.url; });

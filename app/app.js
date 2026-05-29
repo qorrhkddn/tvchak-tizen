@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "1.0.0";
+  var APP_VERSION = "1.0.1";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -255,28 +255,19 @@
         .then(function (j) { return (j && j.items) || []; })
         .catch(function () { return null; }),
     ]).then(function (results) {
-      var h = results[0], f = results[1];
-      if (h === null && f === null) {
-        // server 둘 다 실패 — localStorage 로 fallback
-        try { profileCache.history = JSON.parse(localStorage.getItem(KEYS.HISTORY) || "[]"); } catch (_) {}
-        try { profileCache.favorites = JSON.parse(localStorage.getItem(KEYS.FAVORITES) || "[]"); } catch (_) {}
-      } else {
-        profileCache.history = h || [];
-        profileCache.favorites = f || [];
-        // 1회 마이그레이션: server 가 둘 다 비어있는데 localStorage 에 데이터가
-        // 있으면 그걸 server 로 push (기존 v0.9.x 사용자 데이터 보존).
-        if (profileCache.history.length === 0 && profileCache.favorites.length === 0) {
-          var lh = [], lf = [];
-          try { lh = JSON.parse(localStorage.getItem(KEYS.HISTORY) || "[]"); } catch (_) {}
-          try { lf = JSON.parse(localStorage.getItem(KEYS.FAVORITES) || "[]"); } catch (_) {}
-          if (lh.length || lf.length) {
-            profileCache.history = lh;
-            profileCache.favorites = lf;
-            _pushHistory();
-            _pushFavorites();
-          }
+      profileCache.history = results[0] || [];
+      profileCache.favorites = results[1] || [];
+      // history / favorites 는 server-only. 옛 localStorage 흔적 정리.
+      try { localStorage.removeItem(KEYS.HISTORY); } catch (_) {}
+      try { localStorage.removeItem(KEYS.FAVORITES); } catch (_) {}
+      try {
+        var rm = [];
+        for (var i = 0; i < localStorage.length; i++) {
+          var k = localStorage.key(i);
+          if (k && k.indexOf("tvchak.img:") === 0) rm.push(k);
         }
-      }
+        rm.forEach(function (k) { localStorage.removeItem(k); });
+      } catch (_) {}
       profileCache.ready = true;
     });
   }

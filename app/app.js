@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "1.0.21";
+  var APP_VERSION = "1.0.22";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -1952,6 +1952,7 @@
   function onColor(color) {
     if (currentScreen === "player") {
       if (color === "blue") cycleFitMode();
+      if (color === "green") swapPlayerSrc();  // proxy ↔ 직접 URL 토글
       if (color === "red") {
         // 스트림 URL 만료 등으로 재생 안 될 때 — extract 캐시 무효화 후 같은 화 재시도
         if (player.currentEp) {

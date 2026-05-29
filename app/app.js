@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "1.0.11";
+  var APP_VERSION = "1.0.12";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -1306,6 +1306,11 @@
         player._resumeListener = null;
       }
       player.video.src = src;
+      // 호스트별 cloaking 패턴(smartnote.blog 는 proxy 경유 광고, wiselife.blog
+      // 는 직접 hotlink 거부) 때문에 한 가지 path 만으론 부족. error 발생 시
+      // proxy ↔ 직접 src 를 한 번 swap 해서 재시도하기 위해 둘 다 보관.
+      player.currentExtract = j;
+      player.__triedAlt = false;
 
       var history = STORE.get(KEYS.HISTORY, []);
       var hh = history.find(function (h) { return h.detail_url === detailState.item.url; });
@@ -1408,7 +1413,33 @@
   player.video.addEventListener("ended", function () { goBack(); });
   player.video.addEventListener("playing", function () { player.loadingEl.classList.add("hidden"); });
   player.video.addEventListener("waiting", function () { player.loadingEl.classList.remove("hidden"); });
-  player.video.addEventListener("error", function () { toast("재생 오류", "danger"); });
+  player.video.addEventListener("error", function () {
+    // 호스트별 cloaking 우회: 첫 error 면 proxy ↔ 직접 src 를 한 번 swap 해서
+    // 자동 재시도. 둘 다 실패하면 토스트.
+    if (!player.__triedAlt && player.currentExtract) {
+      player.__triedAlt = true;
+      var v = player.video;
+      var cur = v.currentSrc || v.src || "";
+      var alt = null;
+      if (cur.indexOf("/proxy?u=") >= 0) {
+        // 현재 NAS proxy 경유 → 직접 video_url 시도
+        alt = player.currentExtract.video_url;
+      } else if (/^https?:/.test(cur)) {
+        // 현재 직접 → NAS proxy 시도
+        alt = player.currentExtract.proxy_url;
+      }
+      if (alt && alt !== cur) {
+        try {
+          v.removeAttribute("src");
+          v.load();
+          v.src = alt;
+          v.play().catch(function (_) {});
+        } catch (_) {}
+        return;  // 토스트 안 띄움 — 사용자에게 안 알리고 조용히 재시도
+      }
+    }
+    toast("재생 오류", "danger");
+  });
 
   // 페이지 숨김/종료 시 마지막 위치 즉시 저장 (Tizen은 pagehide/visibilitychange 모두 발생)
   function persistOnExit() { try { persistHistory(); } catch (_) {} }

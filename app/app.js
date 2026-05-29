@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "1.0.10";
+  var APP_VERSION = "1.0.11";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -360,6 +360,58 @@
         renderProfilesList();
       })
       .catch(function (e) { toast("실패: " + e.message, "danger"); });
+  }
+
+  // ---- 클라이언트 코드 업데이트 (base 자체를 GitHub 최신으로 갱신) ----
+  // /api/web/sync/check 로 현재 vs latest SHA 비교 → update_available true 면
+  // '업데이트' 버튼 노출. 그 버튼이 /api/web/sync 를 POST → server 가 GitHub
+  // zipball 받아 /data/web-base 갱신 → 페이지 reload 로 새 base 적용.
+  function checkUpdate() {
+    var statusEl = document.getElementById("update-status");
+    if (!statusEl) return;
+    var base = (nasUrl() || "").replace(/\/$/, "");
+    if (!base) { statusEl.textContent = "NAS 주소 먼저 저장"; return; }
+    statusEl.textContent = "업데이트 확인 중...";
+    fetch(base + "/api/web/sync/check", { cache: "no-store" })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (j.error) {
+          statusEl.textContent = "실패: " + j.error;
+          return;
+        }
+        if (j.update_available) {
+          statusEl.innerHTML =
+            '<strong style="color: var(--accent);">새 버전 있음</strong> · 현재 ' +
+            escapeHtml(j.current_short || "없음") + " → 최신 " + escapeHtml(j.latest_short) +
+            ' &nbsp; <button class="btn focusable" data-action="do-update" ' +
+            'data-row="100" data-col="0">지금 업데이트</button>';
+          if (currentScreen === "settings") rebuildFocus(screens.settings);
+        } else {
+          statusEl.textContent = "최신 (" + (j.current_short || "?") + ")";
+        }
+      })
+      .catch(function (e) { statusEl.textContent = "실패: " + e.message; });
+  }
+
+  function doUpdate() {
+    var statusEl = document.getElementById("update-status");
+    if (!statusEl) return;
+    var base = (nasUrl() || "").replace(/\/$/, "");
+    if (!base) return;
+    statusEl.textContent = "업데이트 중...";
+    fetch(base + "/api/web/sync", {
+      method: "POST",
+      headers: { "Accept": "application/json" },
+    }).then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (j.error) {
+          statusEl.textContent = "실패: " + j.error;
+          return;
+        }
+        statusEl.textContent = "완료 (" + (j.short_sha || "?") + ") — 새로고침 중...";
+        setTimeout(function () { location.reload(); }, 800);
+      })
+      .catch(function (e) { statusEl.textContent = "실패: " + e.message; });
   }
 
   function addProfileApi() {
@@ -1448,6 +1500,8 @@
     if (action === "fav-toggle") return toggleFavorite();
     if (action === "history-toggle") return toggleHistory();
     if (action === "add-profile") return addProfileApi();
+    if (action === "check-update") return checkUpdate();
+    if (action === "do-update") return doUpdate();
     if (action === "search-go") return doSearch();
     if (action === "clear-image-cache") {
       var n = clearImageCache();

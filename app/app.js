@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "1.0.27";
+  var APP_VERSION = "1.0.28";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -1585,11 +1585,73 @@
   player.video.addEventListener("ended", function () { goBack(); });
   player.video.addEventListener("playing", function () { player.loadingEl.classList.add("hidden"); });
   player.video.addEventListener("waiting", function () { player.loadingEl.classList.remove("hidden"); });
+  // 재생 오류 진단 토스트 (TV/모바일/PC 공통). status 기반으로 친절한 한국어
+  // 안내 + currentSrc 표시. mobile.js 에 있던 setupPlayerErrorDiag 를 base 로
+  // 이전 — TV 도 같은 정보 받음.
+  var _ERR_CODE = {
+    1: "ABORTED (사용자 중단)",
+    2: "NETWORK (서버/CORS/5xx)",
+    3: "DECODE (코덱 부분 미지원)",
+    4: "SRC_NOT_SUPPORTED (코덱·컨테이너 미지원 또는 응답이 HTML)"
+  };
+  function _probeSrc(src) {
+    return fetch(src, { method: "GET", headers: { Range: "bytes=0-0" }, cache: "no-store" })
+      .then(function (r) {
+        return {
+          status: r.status,
+          contentType: r.headers.get("content-type") || "?",
+          contentLength: r.headers.get("content-length") || r.headers.get("content-range") || "?",
+        };
+      })
+      .catch(function (e) { return { error: String(e) }; });
+  }
+  function _showErrorToast(parts) {
+    // base 의 #toast element 활용. mobile.js 가 별도 div 띄우면 그게 위에 있음.
+    var t = document.getElementById("toast");
+    if (!t) return;
+    t.textContent = parts.filter(Boolean).join("\n");
+    t.classList.remove("hidden");
+    t.style.whiteSpace = "pre-wrap";
+    t.style.maxWidth = "92vw";
+    t.style.wordBreak = "break-all";
+    t.style.lineHeight = "1.4";
+    clearTimeout(t.__errTimer);
+    t.__errTimer = setTimeout(function () { t.classList.add("hidden"); }, 15000);
+  }
+
   player.video.addEventListener("error", function () {
-    // 자동 swap 은 짧은 로딩을 fail 로 잘못 판단해서 폐기. 사용자가 player
-    // overlay 의 "다른 경로로 다시 시도" 버튼을 직접 눌러 v1(직접)/v2(proxy)
-    // 토글하게 함. 여기는 토스트만.
-    toast("재생 오류", "danger");
+    var v = player.video;
+    var e = v.error;
+    var label = e ? (_ERR_CODE[e.code] || ("code=" + e.code)) : "알 수 없음";
+    var src = (v._hlsSrc || v.currentSrc || v.src || "?");
+    var parts = [
+      "재생 오류: " + label,
+      (e && e.message ? "메시지: " + e.message : null),
+      "src: " + src.slice(0, 200) + (src.length > 200 ? "…" : ""),
+      "응답: 확인 중…",
+    ];
+    _showErrorToast(parts);
+
+    _probeSrc(src).then(function (info) {
+      var respLine, hint;
+      if (info.error) {
+        respLine = "응답: 요청 실패 — " + info.error;
+      } else {
+        respLine = "응답: HTTP " + info.status +
+                   " · " + info.contentType +
+                   " · " + info.contentLength;
+        if (info.status === 404) {
+          hint = "→ 원본 파일이 사라진 회차일 가능성. 다른 회차 시도";
+        } else if (info.status === 403) {
+          hint = "→ hotlink 차단 추정. 초록 키 / '🔁 다른 경로' 시도";
+        } else if (info.status === 200 && /text\/html/i.test(info.contentType || "")) {
+          hint = "→ 광고 wrapper (cloaking). 초록 키 / '🔁 다른 경로' 시도";
+        }
+      }
+      parts[3] = respLine;
+      if (hint) parts.push(hint);
+      _showErrorToast(parts);
+    });
   });
 
   // 페이지 숨김/종료 시 마지막 위치 즉시 저장 (Tizen은 pagehide/visibilitychange 모두 발생)

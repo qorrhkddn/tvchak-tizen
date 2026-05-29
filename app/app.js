@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "1.0.14";
+  var APP_VERSION = "1.0.15";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -1378,6 +1378,15 @@
   function attachHls(v, src) {
     detachHls(v);
     var hls = new window.Hls({ enableWorker: true });
+    // hls.js 의 fatal error (manifest parse 실패 / 네트워크 등) 는 video
+    // element 의 error 이벤트로 전파되지 않아 base 의 swap retry 가 작동
+    // 안 한다. 명시적으로 escalate.
+    hls.on(window.Hls.Events.ERROR, function (event, data) {
+      if (data && data.fatal) {
+        try { detachHls(v); } catch (_) {}
+        try { v.dispatchEvent(new Event("error")); } catch (_) {}
+      }
+    });
     hls.loadSource(src);
     hls.attachMedia(v);
     v._hls = hls;

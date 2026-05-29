@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "1.0.7";
+  var APP_VERSION = "1.0.8";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -320,8 +320,6 @@
                 : 'background:transparent;') + '">' +
               '<span style="font-size:18px;line-height:1;width:18px;text-align:center;">' +
                 (active ? '●' : '○') + '</span>' +
-              '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:' +
-                escapeHtml(p.color || "#888") + ';"></span>' +
               '<span style="flex:1;">' + escapeHtml(p.name) + '</span>' +
               (p.id !== "default"
                 ? '<button class="btn btn-secondary focusable" data-profile-delete="' +

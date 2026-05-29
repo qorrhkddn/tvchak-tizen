@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "1.0.5";
+  var APP_VERSION = "1.0.6";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -272,6 +272,15 @@
     });
   }
 
+  // 사용자가 input/textarea 에 native typing 중이면 비동기 콜백이 setFocus
+  // (그리고 그 안의 scrollIntoView)를 호출했을 때 iOS Safari 가상 키보드가
+  // 닫혀 입력이 중단되는 회귀 케이스가 있다. 그런 경우엔 rebuildFocus 를
+  // skip 한다. focus.current 갱신은 사용자가 input 떠나면 자연스럽게 재호출.
+  function _userIsTypingInInput() {
+    var a = document.activeElement;
+    return !!(a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA"));
+  }
+
   // settings 화면의 모든 .focusable 을 DOM 순서대로 row=0,1,2,... col=0 부여.
   // 같은 row 안 좌우 이동을 없애서 ↑↓ 한 줄 탐색만 되게 한다.
   function assignSettingsFocusOrder() {
@@ -282,7 +291,9 @@
       el.dataset.row = String(idx);
       el.dataset.col = "0";
     });
-    if (currentScreen === "settings") rebuildFocus(screens.settings);
+    if (currentScreen === "settings" && !_userIsTypingInInput()) {
+      rebuildFocus(screens.settings);
+    }
   }
 
   function renderProfilesList() {
@@ -745,7 +756,9 @@
 
     if (!items.length) {
       document.getElementById("grid-status").textContent = opts.emptyHint || "결과가 없습니다.";
-      if (currentScreen === "home") rebuildFocus(screens.home);
+      if (currentScreen === "home" && !opts.noRebuildFocus && !_userIsTypingInInput()) {
+        rebuildFocus(screens.home);
+      }
       return;
     }
     items.forEach(function (it) { appendCard(grid, it, onClickItem, opts); });
@@ -753,14 +766,18 @@
     if (opts.deleteHint) {
       document.getElementById("grid-status").textContent = opts.deleteHint;
     }
-    if (currentScreen === "home") rebuildFocus(screens.home);
+    if (currentScreen === "home" && !opts.noRebuildFocus && !_userIsTypingInInput()) {
+      rebuildFocus(screens.home);
+    }
   }
 
   function appendToGrid(items, onClickItem, opts) {
     opts = opts || {};
     var grid = document.getElementById("grid");
     items.forEach(function (it) { appendCard(grid, it, onClickItem, opts); });
-    if (currentScreen === "home") rebuildFocus(screens.home);  // 새 카드만 추가, 현재 포커스는 유지됨
+    if (currentScreen === "home" && !_userIsTypingInInput()) {
+      rebuildFocus(screens.home);  // 새 카드만 추가, 현재 포커스는 유지됨
+    }
   }
 
   function appendCard(grid, it, onClickItem, opts) {
@@ -870,7 +887,9 @@
     if (!q) { toast("검색어를 입력하세요", "danger"); return; }
     document.getElementById("grid-status").textContent = "검색 중: " + q;
     apiGet("/api/search?q=" + encodeURIComponent(q), { bypass: bypass }).then(function (j) {
-      renderGrid(j.items || [], openDetail);
+      // user 가 검색창 typing 중이면 결과 받아도 rebuild 안 함 (iOS 키보드 보호)
+      var typing = _userIsTypingInInput();
+      renderGrid(j.items || [], openDetail, typing ? { noRebuildFocus: true } : undefined);
     }).catch(function (e) {
       document.getElementById("grid-status").textContent = "검색 실패: " + e.message;
     });

@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "1.0.3";
+  var APP_VERSION = "1.0.4";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -272,6 +272,19 @@
     });
   }
 
+  // settings 화면의 모든 .focusable 을 DOM 순서대로 row=0,1,2,... col=0 부여.
+  // 같은 row 안 좌우 이동을 없애서 ↑↓ 한 줄 탐색만 되게 한다.
+  function assignSettingsFocusOrder() {
+    var screen = document.getElementById("screen-settings");
+    if (!screen) return;
+    var els = screen.querySelectorAll(".focusable");
+    els.forEach(function (el, idx) {
+      el.dataset.row = String(idx);
+      el.dataset.col = "0";
+    });
+    if (currentScreen === "settings") rebuildFocus(screens.settings);
+  }
+
   function renderProfilesList() {
     var listEl = document.getElementById("profiles-list");
     if (!listEl) return;
@@ -306,28 +319,8 @@
             '</div>';
         });
         listEl.innerHTML = html;
-
-        // 포커스 매니저용 row/col 부여 — settings 의 다른 요소가 row 0~2 를
-        // 차지하므로 프로필은 3부터 시작. 비동기 렌더라 settings 가 현재
-        // 화면이면 rebuildFocus 다시 호출.
-        var startRow = 3;
-        var rows = listEl.querySelectorAll(".profile-row");
-        rows.forEach(function (row, idx) {
-          var r = startRow + idx;
-          row.dataset.row = String(r);
-          row.dataset.col = "0";
-          var del = row.querySelector("[data-profile-delete]");
-          if (del) { del.dataset.row = String(r); del.dataset.col = "1"; }
-        });
-        var lastRow = startRow + rows.length;
-        var newInput = document.getElementById("new-profile-input");
-        if (newInput) { newInput.dataset.row = String(lastRow); newInput.dataset.col = "0"; }
-        var addBtn = document.querySelector('[data-action="add-profile"]');
-        if (addBtn) { addBtn.dataset.row = String(lastRow); addBtn.dataset.col = "1"; }
-
-        if (currentScreen === "settings") {
-          rebuildFocus(screens.settings);
-        }
+        // 프로필 row 추가됐으니 settings 전체 포커스 순서 다시 부여.
+        assignSettingsFocusOrder();
       })
       .catch(function () {
         listEl.innerHTML = '<div class="muted">프로필 로드 실패 (NAS 응답 없음)</div>';
@@ -626,26 +619,15 @@
   // ---------- 설정 화면 ----------
   function renderSettings() {
     var nasInput = document.getElementById("nas-input");
-    // 저장된 주소가 있을 때만 채우고, 첫 사용자는 placeholder만 보여서
-    // 무심코 더미 IP를 저장하지 않게 한다.
     nasInput.value = nasUrl();
-    nasInput.dataset.row = "0"; nasInput.dataset.col = "0";
-
-    var actions = document.querySelectorAll("#screen-settings .settings-actions .focusable");
-    for (var i = 0; i < actions.length; i++) {
-      actions[i].dataset.row = "1";
-      actions[i].dataset.col = String(i);
-    }
 
     var ttlInput = document.getElementById("cache-ttl-input");
-    if (ttlInput) {
-      ttlInput.value = getCacheTtlHours();
-      ttlInput.dataset.row = "2"; ttlInput.dataset.col = "0";
-    }
-    var saveTtlBtn = document.querySelector('[data-action="save-cache-ttl"]');
-    if (saveTtlBtn) { saveTtlBtn.dataset.row = "2"; saveTtlBtn.dataset.col = "1"; }
+    if (ttlInput) ttlInput.value = getCacheTtlHours();
 
     renderProfilesList();
+    // 모든 settings 의 focusable 을 DOM 순서대로 위/아래 한 줄로 배치.
+    // 같은 row 내 좌우 이동이 없도록 col 은 전부 0.
+    assignSettingsFocusOrder();
 
     document.getElementById("settings-status").textContent = "";
     focus.current = null;

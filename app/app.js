@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "0.9.5";
+  var APP_VERSION = "0.9.6";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -789,6 +789,9 @@
     document.querySelector('#screen-detail [data-action="back"]').dataset.col = "0";
     document.getElementById("fav-btn").dataset.row = "1";
     document.getElementById("fav-btn").dataset.col = "0";
+    document.getElementById("history-btn").dataset.row = "1";
+    document.getElementById("history-btn").dataset.col = "1";
+    updateHistoryButton();
     focus.current = null;
     rebuildFocus(screens.detail);
 
@@ -803,6 +806,7 @@
       }
       renderEpisodes(j.episodes || []);
       updateFavButton();
+      updateHistoryButton();
       updateResumeInfo();
     }).catch(function (e) {
       document.getElementById("detail-plot").textContent = "실패: " + e.message;
@@ -837,11 +841,13 @@
       list.appendChild(card);
     });
 
-    // 뒤로 버튼 / 즐겨찾기 버튼은 row=0,1로
+    // 뒤로 버튼 / 즐겨찾기 / 이어보기 토글 — row=0,1
     document.querySelector('#screen-detail [data-action="back"]').dataset.row = "0";
     document.querySelector('#screen-detail [data-action="back"]').dataset.col = "0";
     document.getElementById("fav-btn").dataset.row = "1";
     document.getElementById("fav-btn").dataset.col = "0";
+    document.getElementById("history-btn").dataset.row = "1";
+    document.getElementById("history-btn").dataset.col = "1";
     // 첫 진입 시 자동으로 첫 에피소드(이어보기가 있으면 그쪽)로 포커스
     var preferred = null;
     var lastUrl = detailState.historyHit && detailState.historyHit.lastEpisode
@@ -860,6 +866,39 @@
     var favs = STORE.get(KEYS.FAVORITES, []);
     var on = favs.some(function (f) { return f.detail_url === detailState.item.url; });
     document.getElementById("fav-btn").textContent = on ? "즐겨찾기 해제" : "즐겨찾기 추가";
+  }
+
+  function updateHistoryButton() {
+    if (!detailState || !detailState.item) return;
+    var hits = STORE.get(KEYS.HISTORY, []);
+    var on = hits.some(function (h) { return h.detail_url === detailState.item.url; });
+    document.getElementById("history-btn").textContent =
+      on ? "이어보기에서 제거" : "이어보기에 추가";
+  }
+
+  function toggleHistory() {
+    if (!detailState || !detailState.item) return;
+    var hits = STORE.get(KEYS.HISTORY, []);
+    var idx = hits.findIndex(function (h) { return h.detail_url === detailState.item.url; });
+    if (idx >= 0) {
+      hits.splice(idx, 1);
+      STORE.set(KEYS.HISTORY, hits);
+      toast("이어보기에서 제거", "ok");
+    } else {
+      // placeholder entry — 실제 재생 시 episodes / lastEpisode 가 자동 채워진다.
+      var info = detailState.info, it = detailState.item;
+      hits.push({
+        title: (info && info.title) || it.title,
+        detail_url: it.url,
+        poster: (info && info.poster) || it.poster,
+        poster_proxy_path: stripNasPrefix(it.poster_proxy_url || (info && info.poster_proxy_url)),
+        episodes: {},
+        updatedAt: Date.now(),
+      });
+      STORE.set(KEYS.HISTORY, hits);
+      toast("이어보기에 추가", "ok");
+    }
+    updateHistoryButton();
   }
 
   function toggleFavorite() {
@@ -1096,6 +1135,7 @@
     if (action === "refresh") return refreshCurrent();
     if (action === "back") return goBack();
     if (action === "fav-toggle") return toggleFavorite();
+    if (action === "history-toggle") return toggleHistory();
     if (action === "search-go") return doSearch();
     if (action === "clear-image-cache") {
       var n = clearImageCache();

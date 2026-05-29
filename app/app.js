@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "0.9.8";
+  var APP_VERSION = "0.9.9";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -1160,6 +1160,11 @@
           if (verEl) verEl.textContent = "TV v" + APP_VERSION + " · srv v" + j.server_version;
         }
       }).catch(function () {});
+      // recent/fav 탭은 detail에서 토글한 결과(history/fav 추가·제거)가
+      // localStorage에서만 바뀌고 grid는 안 다시 그려져서 사라진 카드가
+      // 화면에 남아있는다. home 복귀 시 해당 탭이면 강제로 다시 그림.
+      if (homeState.tab === "recent") renderRecentTab();
+      else if (homeState.tab === "fav") renderFavTab();
       // 직전에 home에서 봤던 카드가 있으면 그쪽으로, 없으면 활성 탭으로
       var preferred = homeState.lastFocus
         && document.body.contains(homeState.lastFocus)

@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "1.0.12";
+  var APP_VERSION = "1.0.13";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -1299,7 +1299,10 @@
 
     apiGet("/api/extract?u=" + encodeURIComponent(ep.play_url), { bypass: bypass }).then(function (j) {
       if (j.error) throw new Error(j.error);
-      var src = j.proxy_url || resolveNasUrl(j.proxy_path);
+      // 1차: 직접 URL 시도 — client 가 m3u8/mp4 호스트에 직접 fetch.
+      // 호스트의 cloaking 정책에 따라 proxy 경유보다 직접이 통과되는 경우 있음.
+      // 실패하면 video error handler 가 proxy_url 로 자동 swap.
+      var src = j.video_url || j.proxy_url || resolveNasUrl(j.proxy_path);
       // 이전 시청 listener가 남아있을 경우 정리
       if (player._resumeListener) {
         try { player.video.removeEventListener("loadedmetadata", player._resumeListener); } catch(_){}

@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "1.0.16";
+  var APP_VERSION = "1.0.17";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -1309,11 +1309,11 @@
         player._resumeListener = null;
       }
       setVideoSrc(player.video, src);
-      // 호스트별 cloaking 패턴(smartnote.blog 는 proxy 경유 광고, wiselife.blog
-      // 는 직접 hotlink 거부) 때문에 한 가지 path 만으론 부족. error 발생 시
-      // proxy ↔ 직접 src 를 한 번 swap 해서 재시도하기 위해 둘 다 보관.
+      // 두 path(j.video_url 직접, j.proxy_url NAS 경유) 보관. 사용자가
+      // overlay 의 "다른 경로로 다시 시도" 버튼으로 직접 swap.
       player.currentExtract = j;
-      player.__triedAlt = false;
+      var info = document.getElementById("swap-src-info");
+      if (info) info.textContent = "→ 직접 URL";
 
       var history = STORE.get(KEYS.HISTORY, []);
       var hh = history.find(function (h) { return h.detail_url === detailState.item.url; });
@@ -1336,6 +1336,38 @@
       toast("스트림 추출 실패: " + e.message, "danger");
       goBack();
     });
+  }
+
+  // player overlay 의 "다른 경로로 다시 시도" 버튼.
+  // 현재 video.src(또는 hls.url) 가 NAS proxy 경유면 직접 video_url 로,
+  // 직접이면 proxy_url 로 swap. 사용자가 직접 컨트롤.
+  function swapPlayerSrc() {
+    if (!player.currentExtract) {
+      toast("재생 정보가 없습니다.", "danger");
+      return;
+    }
+    var v = player.video;
+    var cur = v._hlsSrc || v.currentSrc || v.src || "";
+    var video_url = player.currentExtract.video_url || "";
+    var proxy_url = player.currentExtract.proxy_url || "";
+    var alt = null, kind = "";
+    var isProxy = cur.indexOf("/proxy?u=") >= 0;
+    if (isProxy && video_url) { alt = video_url; kind = "직접 URL"; }
+    else if (proxy_url)       { alt = proxy_url; kind = "NAS proxy"; }
+    if (!alt) {
+      toast("대체 경로가 없습니다.", "danger");
+      return;
+    }
+    toast(kind + "로 다시 시도...", "ok");
+    var info = document.getElementById("swap-src-info");
+    if (info) info.textContent = "→ " + kind;
+    try {
+      detachHls(v);
+      v.removeAttribute("src");
+      v.load();
+      setVideoSrc(v, alt);
+      v.play().catch(function (_) {});
+    } catch (_) {}
   }
 
   function stopPlayback() {
@@ -1378,18 +1410,12 @@
   function attachHls(v, src) {
     detachHls(v);
     var hls = new window.Hls({ enableWorker: true });
-    // hls.js 의 fatal error (manifest parse 실패 / 네트워크 등) 는 video
-    // element 의 error 이벤트로 전파되지 않아 base 의 swap retry 가 작동
-    // 안 한다. 명시적으로 escalate.
-    hls.on(window.Hls.Events.ERROR, function (event, data) {
-      if (data && data.fatal) {
-        try { detachHls(v); } catch (_) {}
-        try { v.dispatchEvent(new Event("error")); } catch (_) {}
-      }
-    });
+    // fatal error 도 자동 swap 안 함 — 사용자가 "다른 경로로 다시 시도"
+    // 버튼을 직접 눌러 처리.
     hls.loadSource(src);
     hls.attachMedia(v);
     v._hls = hls;
+    v._hlsSrc = src;  // 진단 토스트가 진짜 URL 표시할 때 사용
   }
   // NAS proxy URL 안에도 m3u8 이 박혀있는 케이스를 잡기 위해 inner u 파라미터
   // 까지 검사.
@@ -1490,27 +1516,9 @@
   player.video.addEventListener("playing", function () { player.loadingEl.classList.add("hidden"); });
   player.video.addEventListener("waiting", function () { player.loadingEl.classList.remove("hidden"); });
   player.video.addEventListener("error", function () {
-    // 호스트별 cloaking 우회: 첫 error 면 proxy ↔ 직접 src 를 한 번 swap 해서
-    // 자동 재시도. 둘 다 실패하면 토스트.
-    //
-    // 첫 시도 src 는 playEpisode 에서 j.video_url(직접) → 박았으므로 swap
-    // target 은 항상 j.proxy_url. v.currentSrc 가 blob://(hls.js MediaSource)
-    // 이거나 NAS proxy URL 이거나 직접 URL 이거나 상관없이 단순화.
-    if (!player.__triedAlt && player.currentExtract) {
-      player.__triedAlt = true;
-      var v = player.video;
-      var alt = player.currentExtract.proxy_url;
-      if (alt) {
-        try {
-          detachHls(v);
-          v.removeAttribute("src");
-          v.load();
-          setVideoSrc(v, alt);
-          v.play().catch(function (_) {});
-        } catch (_) {}
-        return;
-      }
-    }
+    // 자동 swap 은 짧은 로딩을 fail 로 잘못 판단해서 폐기. 사용자가 player
+    // overlay 의 "다른 경로로 다시 시도" 버튼을 직접 눌러 v1(직접)/v2(proxy)
+    // 토글하게 함. 여기는 토스트만.
     toast("재생 오류", "danger");
   });
 
@@ -1603,6 +1611,7 @@
     if (action === "back") return goBack();
     if (action === "fav-toggle") return toggleFavorite();
     if (action === "history-toggle") return toggleHistory();
+    if (action === "swap-src") return swapPlayerSrc();
     if (action === "add-profile") return addProfileApi();
     if (action === "check-update") return checkUpdate();
     if (action === "do-update") return doUpdate();

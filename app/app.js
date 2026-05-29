@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "1.0.1";
+  var APP_VERSION = "1.0.2";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -287,19 +287,23 @@
         var html = "";
         (j.profiles || []).forEach(function (p) {
           var active = p.id === current;
+          // row 전체가 라디오. 현재 프로필이면 ● 표시 + 강조 배경, 아니면 ○.
+          // 클릭하면 그 프로필로 전환. TV 포커스도 row 단위(.focusable).
           html +=
-            '<div class="profile-row" style="display:flex;align-items:center;gap:8px;padding:6px 0;">' +
-              '<span style="display:inline-block;width:14px;height:14px;border-radius:50%;background:' +
-                escapeHtml(p.color || "#888") + '"></span>' +
-              '<span style="flex:1;">' + escapeHtml(p.name) +
-                (active ? ' <em class="muted">(현재)</em>' : '') + '</span>' +
-              (!active
-                ? '<button class="btn btn-secondary focusable" data-profile-switch="' +
-                    escapeHtml(p.id) + '">전환</button>'
-                : '') +
+            '<div class="profile-row focusable" data-profile-switch="' + escapeHtml(p.id) + '"' +
+              ' style="display:flex;align-items:center;gap:10px;padding:8px 10px;' +
+              'border-radius:6px;cursor:pointer;margin-bottom:4px;' +
+              (active
+                ? 'background:rgba(79,140,255,0.15);'
+                : 'background:transparent;') + '">' +
+              '<span style="font-size:18px;line-height:1;width:18px;text-align:center;">' +
+                (active ? '●' : '○') + '</span>' +
+              '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:' +
+                escapeHtml(p.color || "#888") + ';"></span>' +
+              '<span style="flex:1;">' + escapeHtml(p.name) + '</span>' +
               (p.id !== "default"
                 ? '<button class="btn btn-secondary focusable" data-profile-delete="' +
-                    escapeHtml(p.id) + '">삭제</button>'
+                    escapeHtml(p.id) + '" onclick="event.stopPropagation()">삭제</button>'
                 : '') +
             '</div>';
         });
@@ -1348,13 +1352,20 @@
     if (act) handleAction(act.dataset.action);
     var tab = e.target.closest("[data-tab]");
     if (tab) selectTab(tab.dataset.tab);
-    var psw = e.target.closest("[data-profile-switch]");
-    if (psw) switchProfile(psw.dataset.profileSwitch);
+    // 삭제 버튼이 더 우선 — 삭제 버튼 안의 클릭에서 row 의 profile-switch 가
+    // 같이 트리거되지 않도록 먼저 검사하고 return.
     var pdel = e.target.closest("[data-profile-delete]");
     if (pdel) {
       if (typeof confirm !== "function" || confirm("이 프로필을 삭제할까요? 시청기록·즐겨찾기가 모두 사라집니다.")) {
         deleteProfileApi(pdel.dataset.profileDelete);
       }
+      return;
+    }
+    var psw = e.target.closest("[data-profile-switch]");
+    if (psw) {
+      // 현재 프로필을 다시 누른 거면 무동작
+      var cur = profileCache.id || _currentProfileId();
+      if (psw.dataset.profileSwitch !== cur) switchProfile(psw.dataset.profileSwitch);
     }
   });
 

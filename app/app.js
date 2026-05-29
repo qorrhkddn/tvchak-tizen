@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "1.0.18";
+  var APP_VERSION = "1.0.19";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -1410,13 +1410,34 @@
   }
   function attachHls(v, src) {
     detachHls(v);
-    var hls = new window.Hls({ enableWorker: true });
-    // fatal error 도 자동 swap 안 함 — 사용자가 "다른 경로로 다시 시도"
-    // 버튼을 직접 눌러 처리.
+    var nas = (nasUrl() || "").replace(/\/$/, "");
+    var hls = new window.Hls({
+      enableWorker: true,
+      // m3u8 안의 segment URL(절대 URL) 도 NAS proxy 를 거치게 한다.
+      // 사용자 PC 직접 호출 시 cors / referer cloaking 으로 segment 못 받아
+      // 영상 frame 이 안 그려지는 케이스(manifest 만 받고 멈춤)를 해결.
+      xhrSetup: function (xhr, url) {
+        if (!nas) return;
+        if (typeof url !== "string") return;
+        if (!/^https?:/.test(url)) return;
+        if (url.indexOf(nas) === 0) return;  // 이미 NAS 거침
+        try {
+          var proxied = nas + "/proxy?u=" + encodeURIComponent(url);
+          xhr.open("GET", proxied, true);
+        } catch (_) {}
+      },
+    });
+    // 진단용 — fatal 이면 사용자에게 알림. 자동 swap 은 안 함.
+    hls.on(window.Hls.Events.ERROR, function (event, data) {
+      try { console.warn("[hls.js]", data); } catch (_) {}
+      if (data && data.fatal) {
+        toast("스트림 오류 — '🔁 다른 경로' 버튼 시도", "danger");
+      }
+    });
     hls.loadSource(src);
     hls.attachMedia(v);
     v._hls = hls;
-    v._hlsSrc = src;  // 진단 토스트가 진짜 URL 표시할 때 사용
+    v._hlsSrc = src;
   }
   // NAS proxy URL 안에도 m3u8 이 박혀있는 케이스를 잡기 위해 inner u 파라미터
   // 까지 검사.

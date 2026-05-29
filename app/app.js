@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "1.0.4";
+  var APP_VERSION = "1.0.5";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -327,12 +327,16 @@
       });
   }
 
+  // 프로필 전환 후 settings 유지. 사용자가 back으로 나가면 home의 onScreenEnter
+  // 가 이 flag 를 보고 이어보기 탭으로 자동 이동 + 새 프로필 데이터로 reload.
+  var _profileJustSwitched = false;
+
   function switchProfile(pid) {
     _setCurrentProfileId(pid);
     loadProfile(pid).then(function () {
-      toast("프로필 전환됨", "ok");
+      _profileJustSwitched = true;
+      toast("프로필 전환됨 — 뒤로 나가면 적용", "ok");
       renderProfilesList();
-      enterHome();
     });
   }
 
@@ -1331,6 +1335,12 @@
           if (verEl) verEl.textContent = "TV v" + APP_VERSION + " · srv v" + j.server_version;
         }
       }).catch(function () {});
+      // 프로필 전환 직후면 이어보기 탭으로 자동 이동.
+      if (_profileJustSwitched) {
+        _profileJustSwitched = false;
+        selectTab("recent");
+        return;  // selectTab 이 자체적으로 rebuildFocus 처리
+      }
       // recent/fav 탭은 detail에서 토글한 결과(history/fav 추가·제거)가
       // localStorage에서만 바뀌고 grid는 안 다시 그려져서 사라진 카드가
       // 화면에 남아있는다. home 복귀 시 해당 탭이면 강제로 다시 그림.

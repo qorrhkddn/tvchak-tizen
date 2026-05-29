@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "0.9.7";
+  var APP_VERSION = "0.9.8";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -970,6 +970,46 @@
     player.loadingEl.classList.remove("hidden");
     player.overlay.classList.remove("hidden");
     applyFitMode();
+
+    // 사용자가 episode를 클릭한 시점에 이미 history에 placeholder를 박아둔다.
+    // 그래야 재생이 1초 미만에 실패하거나(BunnyCDN 404 등) mobile의 외부 iframe
+    // fallback으로 빠져서 base video가 안 움직이는 경우에도 detail 화면에
+    // 진행률·"이어보기에서 제거" 버튼이 정상 표시된다. 정상 재생 중에는
+    // persistHistory가 5초마다 같은 entry의 position/duration을 덮어쓴다.
+    try {
+      if (detailState && detailState.item) {
+        var history = STORE.get(KEYS.HISTORY, []);
+        var idx = history.findIndex(function (h) {
+          return h.detail_url === detailState.item.url;
+        });
+        var info = detailState.info, it = detailState.item;
+        var entry = idx >= 0 ? history[idx] : {
+          detail_url: it.url,
+          title: (info && info.title) || it.title,
+          poster: (info && info.poster) || it.poster,
+          poster_proxy_path: stripNasPrefix(it.poster_proxy_url || (info && info.poster_proxy_url)),
+          episodes: {},
+        };
+        entry.episodes = entry.episodes || {};
+        // 같은 회차가 이미 있으면 position 유지(재시청 흐름), 없으면 0부터
+        if (!entry.episodes[ep.play_url]) {
+          entry.episodes[ep.play_url] = {
+            position: 0, duration: 0,
+            name: ep.name || "", episode: ep.episode || 0,
+          };
+        }
+        entry.lastEpisode = {
+          play_url: ep.play_url,
+          name: ep.name || "",
+          position: entry.episodes[ep.play_url].position || 0,
+        };
+        entry.updatedAt = Date.now();
+        if (idx >= 0) history[idx] = entry; else history.push(entry);
+        history.sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); });
+        if (history.length > 50) history.length = 50;
+        STORE.set(KEYS.HISTORY, history);
+      }
+    } catch (_) {}
 
     apiGet("/api/extract?u=" + encodeURIComponent(ep.play_url), { bypass: bypass }).then(function (j) {
       if (j.error) throw new Error(j.error);

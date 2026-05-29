@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "1.0.8";
+  var APP_VERSION = "1.0.9";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -536,22 +536,42 @@
     if (remaining < LOAD_MORE_THRESHOLD_PX) loadCategoryMore();
   }
 
+  // 시각적 위치 기반 키 포커스 이동. dataset.row/col 은 TV 1920px 가정으로
+  // 한 줄 N개 카드를 가정하지만 모바일 grid 는 viewport 에 따라 컬럼 수가
+  // 달라서 어긋난다. getBoundingClientRect 로 실제 화면 위치를 보고:
+  //  - 좌우(dx): 같은 row(top 비슷)에서 현재 element 의 같은 방향 가장 가까운 element
+  //  - 상하(dy): 다른 row(top 다른 줄)에서 col(left) 가장 가까운 element
   function move(dx, dy) {
     if (!focus.current) return;
-    var cur = focus.items.find(function (i) { return i.el === focus.current; });
-    if (!cur) return;
-    var candidates = focus.items.filter(function (i) {
-      if (dx) return i.row === cur.row && (dx > 0 ? i.col > cur.col : i.col < cur.col);
-      if (dy) return (dy > 0 ? i.row > cur.row : i.row < cur.row);
-      return false;
+    var cur = focus.current.getBoundingClientRect();
+    var curCx = cur.left + cur.width / 2;
+    var curCy = cur.top + cur.height / 2;
+    var bestEl = null, bestDist = Infinity;
+    focus.items.forEach(function (item) {
+      if (item.el === focus.current) return;
+      var r = item.el.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) return;
+      var cx = r.left + r.width / 2;
+      var cy = r.top + r.height / 2;
+      if (dx) {
+        // 같은 row 로 간주할 vertical 허용오차 — 현재·후보의 높이 절반
+        var vTol = Math.max(cur.height, r.height) * 0.5;
+        if (Math.abs(cy - curCy) > vTol) return;
+        if (dx > 0 && cx <= curCx) return;
+        if (dx < 0 && cx >= curCx) return;
+        var d = Math.abs(cx - curCx) + Math.abs(cy - curCy) * 0.1;
+        if (d < bestDist) { bestDist = d; bestEl = item.el; }
+      } else if (dy) {
+        if (dy > 0 && cy <= curCy + Math.max(cur.height, r.height) * 0.3) return;
+        if (dy < 0 && cy >= curCy - Math.max(cur.height, r.height) * 0.3) return;
+        // 다음 줄에서 horizontal 가장 가까운 col 우선
+        var dh = Math.abs(cx - curCx);
+        var dv = Math.abs(cy - curCy);
+        var dd = dh * 2 + dv;
+        if (dd < bestDist) { bestDist = dd; bestEl = item.el; }
+      }
     });
-    if (!candidates.length) return;
-    candidates.sort(function (a, b) {
-      var da = Math.abs(a.row - cur.row) * 100 + Math.abs(a.col - cur.col);
-      var db = Math.abs(b.row - cur.row) * 100 + Math.abs(b.col - cur.col);
-      return da - db;
-    });
-    setFocus(candidates[0].el);
+    if (bestEl) setFocus(bestEl);
   }
 
   // ---------- API 호출 ----------

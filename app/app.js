@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "1.0.15";
+  var APP_VERSION = "1.0.16";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -1391,10 +1391,22 @@
     hls.attachMedia(v);
     v._hls = hls;
   }
-  // m3u8 이면 native 우선, 아니면 hls.js. 그 외 형식은 그대로 src 박음.
+  // NAS proxy URL 안에도 m3u8 이 박혀있는 케이스를 잡기 위해 inner u 파라미터
+  // 까지 검사.
+  function _looksLikeM3u8(src) {
+    if (!src) return false;
+    if (/\.m3u8(?:[?&#]|$)/i.test(src)) return true;
+    try {
+      var u = new URL(src, location.href);
+      var inner = u.searchParams.get("u");
+      if (inner && /\.m3u8/i.test(inner)) return true;
+    } catch (_) {}
+    return false;
+  }
+
   function setVideoSrc(v, src) {
     detachHls(v);
-    if (/\.m3u8(\?|$)/i.test(src)) {
+    if (_looksLikeM3u8(src)) {
       var native = v.canPlayType && v.canPlayType("application/vnd.apple.mpegurl");
       if (native === "probably") {
         v.src = src;
@@ -1404,7 +1416,7 @@
         if (Hls && Hls.isSupported && Hls.isSupported()) {
           attachHls(v, src);
         } else {
-          v.src = src;  // hls.js 실패 시 native fallback
+          v.src = src;
         }
       }).catch(function () { v.src = src; });
       return;
@@ -1480,19 +1492,15 @@
   player.video.addEventListener("error", function () {
     // 호스트별 cloaking 우회: 첫 error 면 proxy ↔ 직접 src 를 한 번 swap 해서
     // 자동 재시도. 둘 다 실패하면 토스트.
+    //
+    // 첫 시도 src 는 playEpisode 에서 j.video_url(직접) → 박았으므로 swap
+    // target 은 항상 j.proxy_url. v.currentSrc 가 blob://(hls.js MediaSource)
+    // 이거나 NAS proxy URL 이거나 직접 URL 이거나 상관없이 단순화.
     if (!player.__triedAlt && player.currentExtract) {
       player.__triedAlt = true;
       var v = player.video;
-      var cur = v.currentSrc || v.src || "";
-      var alt = null;
-      if (cur.indexOf("/proxy?u=") >= 0) {
-        // 현재 NAS proxy 경유 → 직접 video_url 시도
-        alt = player.currentExtract.video_url;
-      } else if (/^https?:/.test(cur)) {
-        // 현재 직접 → NAS proxy 시도
-        alt = player.currentExtract.proxy_url;
-      }
-      if (alt && alt !== cur) {
+      var alt = player.currentExtract.proxy_url;
+      if (alt) {
         try {
           detachHls(v);
           v.removeAttribute("src");
@@ -1500,7 +1508,7 @@
           setVideoSrc(v, alt);
           v.play().catch(function (_) {});
         } catch (_) {}
-        return;  // 토스트 안 띄움 — 사용자에게 안 알리고 조용히 재시도
+        return;
       }
     }
     toast("재생 오류", "danger");

@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "1.0.6";
+  var APP_VERSION = "1.0.7";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -1546,7 +1546,15 @@
     if (onBack()) e.preventDefault();
     // false면 default(Tizen 메뉴로) 양보
   });
+  // 한국어 IME 입력(조합) 중에는 base 의 keydown 가로채기를 멈춤.
+  // iOS Safari 한글 조합 중 keydown 이 38/40/13 등으로 발화해서 우리 코드가
+  // active.blur() 를 호출하면 composition 이 깨져 입력이 안 먹는 경우가 있다.
+  var _imeComposing = false;
+  document.addEventListener("compositionstart", function () { _imeComposing = true; });
+  document.addEventListener("compositionend", function () { _imeComposing = false; });
+
   document.addEventListener("keydown", function (e) {
+    if (_imeComposing || e.isComposing) return;
     var k = e.keyCode;
     var active = document.activeElement;
     var inInput = active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA");

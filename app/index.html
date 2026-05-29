@@ -14,7 +14,8 @@
       <p class="muted">시놀로지 등에서 돌고 있는 TVChak 프록시 서버의 주소를 입력하세요.</p>
       <p class="muted">예: <code>http://192.168.1.230:7777</code></p>
       <div class="settings-input-row">
-        <input id="nas-input" class="text-input focusable" type="url"
+        <input id="nas-input" class="text-input focusable" type="text"
+               inputmode="url"
                autocomplete="off" autocapitalize="off" autocorrect="off"
                spellcheck="false"
                placeholder="http://192.168.1.230:7777">
@@ -92,8 +93,8 @@
       <!-- 검색 입력 영역 (검색 탭 진입 시 노출) -->
       <div id="search-area" class="search-area hidden">
         <div class="search-input-row">
-          <input id="search-input" class="text-input focusable" type="search"
-                 autocomplete="off" autocapitalize="off" autocorrect="off"
+          <input id="search-input" class="text-input focusable" type="text"
+                 inputmode="search"
                  placeholder="검색어 (예: 취사병)">
           <button class="btn focusable" data-action="search-go">검색</button>
         </div>

@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "1.0.24";
+  var APP_VERSION = "1.0.25";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -495,6 +495,14 @@
   // browser back/forward 와 우리 SPA screenStack 을 연동.
   // popstate 동안엔 또 pushState 가 호출되지 않도록 플래그.
   var _suppressHistory = false;
+  function _currentHashFor(name) {
+    // deep link 가능한 화면(detail) 은 hash 에 식별자 박음 → 그 URL 만으로
+    // 다른 사람과 공유 가능.
+    if (name === "detail" && detailState && detailState.item && detailState.item.url) {
+      return "#detail?u=" + encodeURIComponent(detailState.item.url);
+    }
+    return "#" + name;
+  }
   function show(name, push) {
     Object.keys(screens).forEach(function (k) { screens[k].classList.add("hidden"); });
     screens[name].classList.remove("hidden");
@@ -502,7 +510,12 @@
       screenStack.push(currentScreen);
       if (!_suppressHistory) {
         try {
-          history.pushState({ screen: name, ts: Date.now() }, "", "#" + name);
+          var hash = _currentHashFor(name);
+          var stateObj = { screen: name, ts: Date.now() };
+          if (name === "detail" && detailState && detailState.item) {
+            stateObj.detail_url = detailState.item.url;
+          }
+          history.pushState(stateObj, "", hash);
         } catch (_) {}
       }
     }
@@ -2057,17 +2070,49 @@
     var verEl2 = document.getElementById("settings-version");
     if (verEl2) verEl2.textContent = "v" + APP_VERSION;
   } catch (_) {}
+  // URL hash 파싱 — deep link 지원. 형식: #detail?u=<encoded detail_url>
+  function _parseHash() {
+    var raw = (location.hash || "").replace(/^#/, "");
+    if (!raw) return null;
+    var qIdx = raw.indexOf("?");
+    var screen = qIdx >= 0 ? raw.slice(0, qIdx) : raw;
+    var params = {};
+    if (qIdx >= 0) {
+      raw.slice(qIdx + 1).split("&").forEach(function (kv) {
+        var eq = kv.indexOf("=");
+        if (eq < 0) return;
+        params[kv.slice(0, eq)] = decodeURIComponent(kv.slice(eq + 1));
+      });
+    }
+    return { screen: screen, params: params };
+  }
+
+  function _applyHashRoute(parsed) {
+    if (!parsed) return false;
+    if (parsed.screen === "detail" && parsed.params.u) {
+      // 외부 link 로 들어온 경우 — 최소 item 으로 openDetail 호출, 나머지는
+      // /api/detail 응답이 채움.
+      openDetail({ url: parsed.params.u, title: "", poster: "" }, null);
+      return true;
+    }
+    return false;
+  }
+
   // 첫 진입을 history 에 등록 + 브라우저 back/forward 리스너.
-  // TV(Tizen) 는 hwkey 가 별도라 무관, 모바일·PC 는 이거로 ← → 동작.
   try {
-    history.replaceState({ screen: "home", ts: Date.now() }, "", location.pathname + "#home");
+    history.replaceState({ screen: "home", ts: Date.now() }, "", location.pathname + (location.hash || "#home"));
   } catch (_) {}
   window.addEventListener("popstate", function (e) {
-    // browser back/forward — 우리 screenStack 으로 라우팅
     if (_suppressHistory) return;
     _suppressHistory = true;
     try {
-      // back: 우리 screenStack 에 이전 화면이 남아있으면 그쪽으로
+      // state.detail_url 이 있으면 deep link 복원 (forward 시)
+      if (e.state && e.state.screen === "detail" && e.state.detail_url) {
+        if (currentScreen === "player") { try { stopPlayback(); } catch (_) {} }
+        openDetail({ url: e.state.detail_url, title: "", poster: "" }, null);
+        return;
+      }
+      // 일반 back: screenStack 활용
       if (screenStack.length > 0) {
         var prev = screenStack.pop();
         if (currentScreen === "player") { try { stopPlayback(); } catch (_) {} }
@@ -2083,10 +2128,14 @@
 
   registerKeys();
   if (nasUrl()) {
-    // 프로필 history/favorites 를 server 에서 pull 한 뒤 home 진입.
-    // 네트워크 실패해도 loadProfile 안에서 localStorage fallback 처리되므로
-    // 무조건 then 으로 진행.
-    loadProfile().then(function () { enterHome(); });
+    loadProfile().then(function () {
+      // URL hash 로 deep link 가 들어왔으면 그쪽으로, 아니면 home.
+      enterHome();
+      var parsed = _parseHash();
+      if (parsed && parsed.screen !== "home") {
+        _applyHashRoute(parsed);
+      }
+    });
   } else {
     show("settings", false);
   }

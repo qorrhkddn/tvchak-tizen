@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "1.0.23";
+  var APP_VERSION = "1.0.24";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -492,11 +492,19 @@
   var currentScreen = null;
   var screenStack = [];
 
+  // browser back/forward 와 우리 SPA screenStack 을 연동.
+  // popstate 동안엔 또 pushState 가 호출되지 않도록 플래그.
+  var _suppressHistory = false;
   function show(name, push) {
     Object.keys(screens).forEach(function (k) { screens[k].classList.add("hidden"); });
     screens[name].classList.remove("hidden");
     if (push !== false && currentScreen && currentScreen !== name) {
       screenStack.push(currentScreen);
+      if (!_suppressHistory) {
+        try {
+          history.pushState({ screen: name, ts: Date.now() }, "", "#" + name);
+        } catch (_) {}
+      }
     }
     currentScreen = name;
     onScreenEnter(name);
@@ -2049,6 +2057,30 @@
     var verEl2 = document.getElementById("settings-version");
     if (verEl2) verEl2.textContent = "v" + APP_VERSION;
   } catch (_) {}
+  // 첫 진입을 history 에 등록 + 브라우저 back/forward 리스너.
+  // TV(Tizen) 는 hwkey 가 별도라 무관, 모바일·PC 는 이거로 ← → 동작.
+  try {
+    history.replaceState({ screen: "home", ts: Date.now() }, "", location.pathname + "#home");
+  } catch (_) {}
+  window.addEventListener("popstate", function (e) {
+    // browser back/forward — 우리 screenStack 으로 라우팅
+    if (_suppressHistory) return;
+    _suppressHistory = true;
+    try {
+      // back: 우리 screenStack 에 이전 화면이 남아있으면 그쪽으로
+      if (screenStack.length > 0) {
+        var prev = screenStack.pop();
+        if (currentScreen === "player") { try { stopPlayback(); } catch (_) {} }
+        show(prev, false);
+      } else if (currentScreen !== "home") {
+        if (currentScreen === "player") { try { stopPlayback(); } catch (_) {} }
+        show("home", false);
+      }
+    } finally {
+      _suppressHistory = false;
+    }
+  });
+
   registerKeys();
   if (nasUrl()) {
     // 프로필 history/favorites 를 server 에서 pull 한 뒤 home 진입.

@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "1.0.13";
+  var APP_VERSION = "1.0.14";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -1308,7 +1308,7 @@
         try { player.video.removeEventListener("loadedmetadata", player._resumeListener); } catch(_){}
         player._resumeListener = null;
       }
-      player.video.src = src;
+      setVideoSrc(player.video, src);
       // 호스트별 cloaking 패턴(smartnote.blog 는 proxy 경유 광고, wiselife.blog
       // 는 직접 hotlink 거부) 때문에 한 가지 path 만으론 부족. error 발생 시
       // proxy ↔ 직접 src 를 한 번 swap 해서 재시도하기 위해 둘 다 보관.
@@ -1346,9 +1346,61 @@
       player._resumeListener = null;
     }
     try { player.video.pause(); } catch (_) {}
+    detachHls(player.video);
     player.video.removeAttribute("src");
     try { player.video.load(); } catch (_) {}
     player.currentEp = null;
+  }
+
+  // ---- HLS.js 동적 로드 ----
+  // Tizen WebKit 일부 환경과 데스크톱 Chrome 은 .m3u8 native 미지원
+  // (canPlayType === "" 또는 "maybe"). 그 경우 hls.js 가져와서 MediaSource 로
+  // attach. iOS Safari / Android Chrome native HLS 가능한 환경은 hls.js 안 씀.
+  var _hlsLoadPromise = null;
+  function ensureHlsJs() {
+    if (window.Hls) return Promise.resolve(window.Hls);
+    if (_hlsLoadPromise) return _hlsLoadPromise;
+    _hlsLoadPromise = new Promise(function (resolve, reject) {
+      var s = document.createElement("script");
+      s.src = "https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js";
+      s.onload = function () { resolve(window.Hls); };
+      s.onerror = function () { _hlsLoadPromise = null; reject(new Error("hls.js 로드 실패")); };
+      document.head.appendChild(s);
+    });
+    return _hlsLoadPromise;
+  }
+  function detachHls(v) {
+    if (v && v._hls) {
+      try { v._hls.destroy(); } catch (_) {}
+      v._hls = null;
+    }
+  }
+  function attachHls(v, src) {
+    detachHls(v);
+    var hls = new window.Hls({ enableWorker: true });
+    hls.loadSource(src);
+    hls.attachMedia(v);
+    v._hls = hls;
+  }
+  // m3u8 이면 native 우선, 아니면 hls.js. 그 외 형식은 그대로 src 박음.
+  function setVideoSrc(v, src) {
+    detachHls(v);
+    if (/\.m3u8(\?|$)/i.test(src)) {
+      var native = v.canPlayType && v.canPlayType("application/vnd.apple.mpegurl");
+      if (native === "probably") {
+        v.src = src;
+        return;
+      }
+      ensureHlsJs().then(function (Hls) {
+        if (Hls && Hls.isSupported && Hls.isSupported()) {
+          attachHls(v, src);
+        } else {
+          v.src = src;  // hls.js 실패 시 native fallback
+        }
+      }).catch(function () { v.src = src; });
+      return;
+    }
+    v.src = src;
   }
 
   function schedulePersist() {
@@ -1433,9 +1485,10 @@
       }
       if (alt && alt !== cur) {
         try {
+          detachHls(v);
           v.removeAttribute("src");
           v.load();
-          v.src = alt;
+          setVideoSrc(v, alt);
           v.play().catch(function (_) {});
         } catch (_) {}
         return;  // 토스트 안 띄움 — 사용자에게 안 알리고 조용히 재시도

@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "0.9.6";
+  var APP_VERSION = "0.9.7";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -1098,6 +1098,17 @@
   // focus.items가 이전 화면(detail/player)의 요소를 들고 있어 키 입력이 먹지 않는다.
   function onScreenEnter(name) {
     if (name === "settings") renderSettings();
+    if (name === "detail" && detailState && detailState.item) {
+      // player → back으로 돌아왔을 때 history가 새로 추가됐을 수 있다.
+      // 토글 버튼·resume 정보·에피소드 진행률 막대를 모두 새로고침.
+      detailState.historyHit = findHistory(detailState.item.url);
+      updateFavButton();
+      updateHistoryButton();
+      updateResumeInfo();
+      if (detailState.info && detailState.info.episodes) {
+        renderEpisodes(detailState.info.episodes);
+      }
+    }
     if (name === "home") {
       apiGet("/api/domain").then(function (j) {
         document.getElementById("seed-info").textContent = j.seed_domain || "";

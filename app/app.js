@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "0.9.9";
+  var APP_VERSION = "1.0.0";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -125,8 +125,12 @@
   }
 
   // ---------- 로컬 스토리지 헬퍼 ----------
+  // history / favorites 는 server-backed profileCache 로 가로채고, 그 외 키는
+  // 기존처럼 localStorage 사용. KEYS 정의는 아래에 있지만 문자열로 직접 비교.
   var STORE = {
     get: function (k, def) {
+      if (k === "tvchak.history") return profileCache.history;
+      if (k === "tvchak.favorites") return profileCache.favorites;
       try {
         var v = localStorage.getItem(k);
         if (v == null) return def;
@@ -137,19 +141,20 @@
       }
     },
     set: function (k, v) {
+      if (k === "tvchak.history") {
+        profileCache.history = v || [];
+        _debouncedPush("history", _pushHistory);
+        return true;
+      }
+      if (k === "tvchak.favorites") {
+        profileCache.favorites = v || [];
+        _debouncedPush("favorites", _pushFavorites);
+        return true;
+      }
       try {
         localStorage.setItem(k, JSON.stringify(v));
         return true;
       } catch (e) {
-        // QuotaExceededError 등 — history는 자동 축소 후 재시도
-        if (k === "tvchak.history" && Array.isArray(v) && v.length > 10) {
-          try {
-            var trimmed = v.slice(0, Math.floor(v.length / 2));
-            localStorage.setItem(k, JSON.stringify(trimmed));
-            try { if (typeof toast === "function") toast("저장 공간 부족: 오래된 시청기록 일부 삭제", "danger"); } catch(_){}
-            return true;
-          } catch (_) {}
-        }
         return false;
       }
     },
@@ -209,11 +214,178 @@
   }
   var KEYS = {
     NAS: "tvchak.nasUrl",
-    HISTORY: "tvchak.history",
-    FAVORITES: "tvchak.favorites",
+    HISTORY: "tvchak.history",       // STORE가 가로채서 server-backed profileCache.history 로 매핑
+    FAVORITES: "tvchak.favorites",   // 동일
     FIT_MODE: "tvchak.fitMode",
     LAST_TAB: "tvchak.lastTab",
+    PROFILE_ID: "tvchak.profileId",
   };
+
+  // ---- 프로필 기반 server-backed cache ----
+  // history / favorites 는 더 이상 localStorage 가 source of truth 가 아님.
+  // 시작 시 server 에서 pull → cache 에 저장, 변경 시 cache 업데이트 + debounced
+  // PUT. 같은 NAS 의 다른 디바이스도 같은 프로필이면 같은 데이터 공유.
+  var profileCache = { id: null, history: [], favorites: [], ready: false };
+
+  function _currentProfileId() {
+    try {
+      var v = localStorage.getItem(KEYS.PROFILE_ID);
+      return v ? JSON.parse(v) : "default";
+    } catch (_) { return "default"; }
+  }
+  function _setCurrentProfileId(id) {
+    try { localStorage.setItem(KEYS.PROFILE_ID, JSON.stringify(id)); } catch (_) {}
+  }
+
+  function loadProfile(pid) {
+    pid = pid || _currentProfileId();
+    profileCache.id = pid;
+    var base = (nasUrl() || "").replace(/\/$/, "");
+    if (!base) {
+      profileCache.ready = true;
+      return Promise.resolve();
+    }
+    return Promise.all([
+      fetch(base + "/api/profiles/" + encodeURIComponent(pid) + "/history")
+        .then(function (r) { return r.json(); })
+        .then(function (j) { return (j && j.items) || []; })
+        .catch(function () { return null; }),
+      fetch(base + "/api/profiles/" + encodeURIComponent(pid) + "/favorites")
+        .then(function (r) { return r.json(); })
+        .then(function (j) { return (j && j.items) || []; })
+        .catch(function () { return null; }),
+    ]).then(function (results) {
+      var h = results[0], f = results[1];
+      if (h === null && f === null) {
+        // server 둘 다 실패 — localStorage 로 fallback
+        try { profileCache.history = JSON.parse(localStorage.getItem(KEYS.HISTORY) || "[]"); } catch (_) {}
+        try { profileCache.favorites = JSON.parse(localStorage.getItem(KEYS.FAVORITES) || "[]"); } catch (_) {}
+      } else {
+        profileCache.history = h || [];
+        profileCache.favorites = f || [];
+        // 1회 마이그레이션: server 가 둘 다 비어있는데 localStorage 에 데이터가
+        // 있으면 그걸 server 로 push (기존 v0.9.x 사용자 데이터 보존).
+        if (profileCache.history.length === 0 && profileCache.favorites.length === 0) {
+          var lh = [], lf = [];
+          try { lh = JSON.parse(localStorage.getItem(KEYS.HISTORY) || "[]"); } catch (_) {}
+          try { lf = JSON.parse(localStorage.getItem(KEYS.FAVORITES) || "[]"); } catch (_) {}
+          if (lh.length || lf.length) {
+            profileCache.history = lh;
+            profileCache.favorites = lf;
+            _pushHistory();
+            _pushFavorites();
+          }
+        }
+      }
+      profileCache.ready = true;
+    });
+  }
+
+  function renderProfilesList() {
+    var listEl = document.getElementById("profiles-list");
+    if (!listEl) return;
+    var base = (nasUrl() || "").replace(/\/$/, "");
+    if (!base) {
+      listEl.innerHTML = '<div class="muted">NAS 주소 저장 후 로딩됩니다.</div>';
+      return;
+    }
+    fetch(base + "/api/profiles")
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        var current = profileCache.id || _currentProfileId();
+        var html = "";
+        (j.profiles || []).forEach(function (p) {
+          var active = p.id === current;
+          html +=
+            '<div class="profile-row" style="display:flex;align-items:center;gap:8px;padding:6px 0;">' +
+              '<span style="display:inline-block;width:14px;height:14px;border-radius:50%;background:' +
+                escapeHtml(p.color || "#888") + '"></span>' +
+              '<span style="flex:1;">' + escapeHtml(p.name) +
+                (active ? ' <em class="muted">(현재)</em>' : '') + '</span>' +
+              (!active
+                ? '<button class="btn btn-secondary focusable" data-profile-switch="' +
+                    escapeHtml(p.id) + '">전환</button>'
+                : '') +
+              (p.id !== "default"
+                ? '<button class="btn btn-secondary focusable" data-profile-delete="' +
+                    escapeHtml(p.id) + '">삭제</button>'
+                : '') +
+            '</div>';
+        });
+        listEl.innerHTML = html;
+      })
+      .catch(function () {
+        listEl.innerHTML = '<div class="muted">프로필 로드 실패 (NAS 응답 없음)</div>';
+      });
+  }
+
+  function switchProfile(pid) {
+    _setCurrentProfileId(pid);
+    loadProfile(pid).then(function () {
+      toast("프로필 전환됨", "ok");
+      renderProfilesList();
+      enterHome();
+    });
+  }
+
+  function deleteProfileApi(pid) {
+    var base = (nasUrl() || "").replace(/\/$/, "");
+    if (!base) return;
+    fetch(base + "/api/profiles/" + encodeURIComponent(pid), { method: "DELETE" })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (j.error) return toast("실패: " + j.error, "danger");
+        toast("프로필 삭제됨", "ok");
+        renderProfilesList();
+      })
+      .catch(function (e) { toast("실패: " + e.message, "danger"); });
+  }
+
+  function addProfileApi() {
+    var input = document.getElementById("new-profile-input");
+    var name = (input && input.value || "").trim();
+    if (!name) return toast("이름을 입력하세요", "danger");
+    var base = (nasUrl() || "").replace(/\/$/, "");
+    if (!base) return toast("NAS 주소 먼저 저장", "danger");
+    fetch(base + "/api/profiles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: name }),
+    }).then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (j.error) return toast("실패: " + j.error, "danger");
+        if (input) input.value = "";
+        toast("프로필 추가됨", "ok");
+        renderProfilesList();
+      })
+      .catch(function (e) { toast("실패: " + e.message, "danger"); });
+  }
+
+  var _pushTimers = {};
+  function _debouncedPush(key, fn) {
+    if (_pushTimers[key]) clearTimeout(_pushTimers[key]);
+    _pushTimers[key] = setTimeout(fn, 300);
+  }
+  function _pushHistory() {
+    if (!profileCache.id) return;
+    var base = (nasUrl() || "").replace(/\/$/, "");
+    if (!base) return;
+    fetch(base + "/api/profiles/" + encodeURIComponent(profileCache.id) + "/history", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(profileCache.history),
+    }).catch(function (e) { console.warn("history push 실패", e); });
+  }
+  function _pushFavorites() {
+    if (!profileCache.id) return;
+    var base = (nasUrl() || "").replace(/\/$/, "");
+    if (!base) return;
+    fetch(base + "/api/profiles/" + encodeURIComponent(profileCache.id) + "/favorites", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(profileCache.favorites),
+    }).catch(function (e) { console.warn("favorites push 실패", e); });
+  }
 
   var FIT_MODES = ["contain", "cover", "fill", "none"];
   var FIT_NAMES = {
@@ -457,6 +629,8 @@
     }
     var saveTtlBtn = document.querySelector('[data-action="save-cache-ttl"]');
     if (saveTtlBtn) { saveTtlBtn.dataset.row = "2"; saveTtlBtn.dataset.col = "1"; }
+
+    renderProfilesList();
 
     document.getElementById("settings-status").textContent = "";
     focus.current = null;
@@ -1183,6 +1357,14 @@
     if (act) handleAction(act.dataset.action);
     var tab = e.target.closest("[data-tab]");
     if (tab) selectTab(tab.dataset.tab);
+    var psw = e.target.closest("[data-profile-switch]");
+    if (psw) switchProfile(psw.dataset.profileSwitch);
+    var pdel = e.target.closest("[data-profile-delete]");
+    if (pdel) {
+      if (typeof confirm !== "function" || confirm("이 프로필을 삭제할까요? 시청기록·즐겨찾기가 모두 사라집니다.")) {
+        deleteProfileApi(pdel.dataset.profileDelete);
+      }
+    }
   });
 
   function handleAction(action) {
@@ -1192,6 +1374,7 @@
     if (action === "back") return goBack();
     if (action === "fav-toggle") return toggleFavorite();
     if (action === "history-toggle") return toggleHistory();
+    if (action === "add-profile") return addProfileApi();
     if (action === "search-go") return doSearch();
     if (action === "clear-image-cache") {
       var n = clearImageCache();
@@ -1578,7 +1761,10 @@
   } catch (_) {}
   registerKeys();
   if (nasUrl()) {
-    enterHome();
+    // 프로필 history/favorites 를 server 에서 pull 한 뒤 home 진입.
+    // 네트워크 실패해도 loadProfile 안에서 localStorage fallback 처리되므로
+    // 무조건 then 으로 진행.
+    loadProfile().then(function () { enterHome(); });
   } else {
     show("settings", false);
   }

@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "1.0.26";
+  var APP_VERSION = "1.0.27";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -1292,6 +1292,10 @@
   }
 
   function playEpisode(ep, bypass) {
+    // show("player") 호출 시 _currentHashFor("player") 가 player.currentEp 의
+    // play_url 을 hash 에 박는다. show 전에 currentEp 를 미리 set 해야 deep
+    // link 가 #play?u=<play_url> 로 정확히 갱신됨.
+    player.currentEp = ep;
     show("player");
     player.titleEl.textContent =
       (detailState.info ? detailState.info.title : "") + " · " + (ep.name || "");

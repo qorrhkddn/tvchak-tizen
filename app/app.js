@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "1.0.2";
+  var APP_VERSION = "1.0.3";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -287,8 +287,6 @@
         var html = "";
         (j.profiles || []).forEach(function (p) {
           var active = p.id === current;
-          // row 전체가 라디오. 현재 프로필이면 ● 표시 + 강조 배경, 아니면 ○.
-          // 클릭하면 그 프로필로 전환. TV 포커스도 row 단위(.focusable).
           html +=
             '<div class="profile-row focusable" data-profile-switch="' + escapeHtml(p.id) + '"' +
               ' style="display:flex;align-items:center;gap:10px;padding:8px 10px;' +
@@ -308,6 +306,28 @@
             '</div>';
         });
         listEl.innerHTML = html;
+
+        // 포커스 매니저용 row/col 부여 — settings 의 다른 요소가 row 0~2 를
+        // 차지하므로 프로필은 3부터 시작. 비동기 렌더라 settings 가 현재
+        // 화면이면 rebuildFocus 다시 호출.
+        var startRow = 3;
+        var rows = listEl.querySelectorAll(".profile-row");
+        rows.forEach(function (row, idx) {
+          var r = startRow + idx;
+          row.dataset.row = String(r);
+          row.dataset.col = "0";
+          var del = row.querySelector("[data-profile-delete]");
+          if (del) { del.dataset.row = String(r); del.dataset.col = "1"; }
+        });
+        var lastRow = startRow + rows.length;
+        var newInput = document.getElementById("new-profile-input");
+        if (newInput) { newInput.dataset.row = String(lastRow); newInput.dataset.col = "0"; }
+        var addBtn = document.querySelector('[data-action="add-profile"]');
+        if (addBtn) { addBtn.dataset.row = String(lastRow); addBtn.dataset.col = "1"; }
+
+        if (currentScreen === "settings") {
+          rebuildFocus(screens.settings);
+        }
       })
       .catch(function () {
         listEl.innerHTML = '<div class="muted">프로필 로드 실패 (NAS 응답 없음)</div>';

@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "1.0.28";
+  var APP_VERSION = "1.0.29";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -803,6 +803,27 @@
       .catch(function (e) {
         toast("실패: " + e.message, "danger");
         document.getElementById("settings-status").textContent = "실패: " + e.message;
+      });
+  }
+
+  function refreshCookie() {
+    // NAS 안 flaresolverr 컨테이너가 Chrome 띄워 챌린지 통과 → cf_clearance 발급.
+    // PC ≠ NAS IP 환경에서 cookie 우회의 유일한 경로. 5~15초 소요.
+    var statusEl = document.getElementById("settings-status");
+    statusEl.textContent = "NAS 안 flaresolverr 가 챌린지 통과 중 (5~15초)...";
+    toast("쿠키 발급 시작 — 잠시만요", "ok");
+    fetch(nasUrl().replace(/\/$/, "") + "/api/cookie/refresh", { method: "POST",
+      headers: { "Accept": "application/json" } })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
+      .then(function (res) {
+        if (!res.ok || res.body.error) throw new Error(res.body.error || "HTTP " + (res.body.status_code || "?"));
+        var names = (res.body.cookie_names || []).join(", ");
+        toast("쿠키 발급 완료 — " + res.body.cookie_length + "B (" + names + ")", "ok");
+        statusEl.textContent = "쿠키 발급 완료: " + names + " · UA 자동 갱신됨";
+      })
+      .catch(function (e) {
+        toast("실패: " + e.message, "danger");
+        statusEl.textContent = "실패: " + e.message;
       });
   }
 
@@ -1751,6 +1772,7 @@
   function handleAction(action) {
     if (action === "save-nas") return saveNasAndContinue();
     if (action === "refresh-domain") return refreshSeedDomain();
+    if (action === "refresh-cookie") return refreshCookie();
     if (action === "refresh") return refreshCurrent();
     if (action === "back") return goBack();
     if (action === "fav-toggle") return toggleFavorite();

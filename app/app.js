@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "1.0.29";
+  var APP_VERSION = "1.0.30";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -1606,6 +1606,43 @@
   player.video.addEventListener("ended", function () { goBack(); });
   player.video.addEventListener("playing", function () { player.loadingEl.classList.add("hidden"); });
   player.video.addEventListener("waiting", function () { player.loadingEl.classList.remove("hidden"); });
+
+  // ---- Picture-in-Picture (iOS Safari / macOS Safari / Chromium) ----
+  // 사용자가 PWA 를 다른 앱 위에 띄우고 싶다는 요구의 현실적 해법. 양 OS 모두
+  // 일반 윈도우 always-on-top 은 막혀있고 video PiP 만 정책상 허용됨.
+  // - 명시 트리거: '🪟 작은 창' 버튼 또는 키보드 단축 — togglePictureInPicture
+  // - 자동 진입: 페이지가 hidden 되는 순간 (PWA 가 background 로 갈 때) 시도.
+  //   iOS 16+ / macOS Safari 16+ 에서 동작. Tizen TV 는 PiP 미지원 — 시도해도
+  //   조용히 실패 (try/catch).
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState !== "hidden") return;
+    if (!player.video || player.video.paused) return;
+    if (document.pictureInPictureElement) return;
+    if (typeof player.video.requestPictureInPicture !== "function") return;
+    try {
+      player.video.requestPictureInPicture().catch(function () {});
+    } catch (_) {}
+  });
+
+  function togglePictureInPicture() {
+    if (!player.video) return;
+    try {
+      if (document.pictureInPictureElement) {
+        document.exitPictureInPicture && document.exitPictureInPicture();
+        return;
+      }
+      if (typeof player.video.requestPictureInPicture !== "function") {
+        toast("이 환경은 PiP 미지원 (iOS Safari / macOS Safari 에서 동작)", "danger");
+        return;
+      }
+      player.video.requestPictureInPicture()
+        .then(function () { toast("작은 창으로 분리됨", "ok"); })
+        .catch(function (e) { toast("PiP 진입 실패: " + e.message, "danger"); });
+    } catch (e) {
+      toast("PiP 실패: " + e.message, "danger");
+    }
+  }
+  window.togglePictureInPicture = togglePictureInPicture;
   // 재생 오류 진단 토스트 (TV/모바일/PC 공통). status 기반으로 친절한 한국어
   // 안내 + currentSrc 표시. mobile.js 에 있던 setupPlayerErrorDiag 를 base 로
   // 이전 — TV 도 같은 정보 받음.
@@ -1778,6 +1815,7 @@
     if (action === "fav-toggle") return toggleFavorite();
     if (action === "history-toggle") return toggleHistory();
     if (action === "swap-src") return swapPlayerSrc();
+    if (action === "pip") return togglePictureInPicture();
     if (action === "add-profile") return addProfileApi();
     if (action === "check-update") return checkUpdate();
     if (action === "do-update") return doUpdate();

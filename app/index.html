@@ -135,7 +135,9 @@
 
     <!-- 플레이어 화면 -->
     <section id="screen-player" class="screen hidden">
-      <video id="video" preload="auto" autoplay></video>
+      <video id="video" preload="auto" autoplay
+             playsinline webkit-playsinline x5-playsinline
+             autopictureinpicture></video>
       <div id="player-overlay" class="player-overlay">
         <div class="player-title" id="player-title"></div>
         <div class="player-progress">
@@ -149,6 +151,10 @@
         <div style="margin-top: 10px;">
           <button class="btn btn-secondary focusable" data-action="swap-src" id="swap-src-btn">
             🔁 다른 경로로 다시 시도
+          </button>
+          <button class="btn btn-secondary focusable" data-action="pip" id="pip-btn"
+                  title="작은 창으로 빼서 다른 작업 위에 띄움 (iOS Safari / macOS Safari)">
+            🪟 작은 창 (PiP)
           </button>
           <span id="swap-src-info" class="muted" style="margin-left: 10px;"></span>
         </div>

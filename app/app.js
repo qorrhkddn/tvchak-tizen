@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "1.0.30";
+  var APP_VERSION = "1.0.31";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -807,25 +807,115 @@
   }
 
   function refreshCookie() {
-    // NAS 안 flaresolverr 컨테이너가 Chrome 띄워 챌린지 통과 → cf_clearance 발급.
-    // PC ≠ NAS IP 환경에서 cookie 우회의 유일한 경로. 5~15초 소요.
-    var statusEl = document.getElementById("settings-status");
-    statusEl.textContent = "NAS 안 flaresolverr 가 챌린지 통과 중 (5~15초)...";
-    toast("쿠키 발급 시작 — 잠시만요", "ok");
-    fetch(nasUrl().replace(/\/$/, "") + "/api/cookie/refresh", { method: "POST",
-      headers: { "Accept": "application/json" } })
-      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
-      .then(function (res) {
-        if (!res.ok || res.body.error) throw new Error(res.body.error || "HTTP " + (res.body.status_code || "?"));
-        var names = (res.body.cookie_names || []).join(", ");
-        toast("쿠키 발급 완료 — " + res.body.cookie_length + "B (" + names + ")", "ok");
-        statusEl.textContent = "쿠키 발급 완료: " + names + " · UA 자동 갱신됨";
-      })
-      .catch(function (e) {
-        toast("실패: " + e.message, "danger");
-        statusEl.textContent = "실패: " + e.message;
-      });
+    // 설정 화면의 기존 버튼 — 이제 우상단 FAB / 오버레이와 동일 UI 로 통일.
+    triggerCookieRefresh();
   }
+
+  // ---------- cf_clearance FAB + 전체 화면 오버레이 (모든 screen 공통) ----------
+  var _autoRefreshInFlight = false;
+  var _lastAutoRefreshTs = 0;
+
+  function triggerCookieRefresh() {
+    if (_autoRefreshInFlight) return;  // 중복 트리거 방지
+    _autoRefreshInFlight = true;
+    var ov = document.getElementById("cookie-refresh-overlay");
+    var icon = document.getElementById("cr-icon");
+    var title = document.getElementById("cr-title");
+    var detail = document.getElementById("cr-detail");
+    var actions = document.getElementById("cr-actions");
+    var confirmBtn = document.getElementById("cr-confirm");
+    var closeBtn = document.getElementById("cr-close");
+    if (!ov) { _autoRefreshInFlight = false; return; }
+
+    // 진행 중 상태로 리셋
+    icon.innerHTML = '<div class="cr-spinner"></div>';
+    icon.style.color = "";
+    title.textContent = "쿠키 갱신 중";
+    title.style.color = "";
+    detail.innerHTML =
+      "NAS 안 flaresolverr 가 Chrome 띄워 Cloudflare 챌린지 통과 중…<br>" +
+      "<strong>약 1분 이내 완료</strong>. 창을 닫지 마세요.";
+    actions.classList.add("hidden");
+    ov.classList.remove("hidden");
+
+    var startTs = Date.now();
+    fetch(nasUrl().replace(/\/$/, "") + "/api/cookie/refresh", {
+      method: "POST", headers: { "Accept": "application/json" }
+    })
+    .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; }); })
+    .then(function (res) {
+      var elapsed = ((Date.now() - startTs) / 1000).toFixed(1);
+      if (!res.ok || res.body.error) {
+        icon.textContent = "✗";
+        icon.style.color = "var(--danger)";
+        title.textContent = "발급 실패";
+        title.style.color = "var(--danger)";
+        detail.innerHTML =
+          '<span style="color:var(--danger)">' + (res.body.error || ("HTTP " + res.status)) + "</span>" +
+          '<br><span style="color:var(--muted);font-size:14px;">경과 ' + elapsed + "s</span>";
+        confirmBtn.style.display = "none";
+        closeBtn.textContent = "닫기";
+      } else {
+        var names = (res.body.cookie_names || []).join(", ");
+        icon.textContent = "✓";
+        icon.style.color = "var(--ok, #3aaf3a)";
+        title.textContent = "발급 완료";
+        title.style.color = "var(--ok, #3aaf3a)";
+        detail.innerHTML =
+          "쿠키 " + res.body.cookie_length + "B<br>" +
+          '<code>' + names + "</code><br>" +
+          '<span style="color:var(--muted);font-size:14px;">경과 ' + elapsed + "s</span>";
+        confirmBtn.style.display = "";
+        closeBtn.textContent = "그냥 닫기";
+      }
+      actions.classList.remove("hidden");
+    })
+    .catch(function (e) {
+      icon.textContent = "✗";
+      icon.style.color = "var(--danger)";
+      title.textContent = "호출 실패";
+      title.style.color = "var(--danger)";
+      detail.innerHTML = '<span style="color:var(--danger)">' + e.message + "</span>";
+      confirmBtn.style.display = "none";
+      closeBtn.textContent = "닫기";
+      actions.classList.remove("hidden");
+    })
+    .then(function () {
+      _autoRefreshInFlight = false;
+      _lastAutoRefreshTs = Date.now();
+    });
+
+    confirmBtn.onclick = function () { location.reload(); };
+    closeBtn.onclick = function () { ov.classList.add("hidden"); };
+  }
+  window.triggerCookieRefresh = triggerCookieRefresh;
+
+  // fetch monkey-patch — 응답이 cf_challenge / blocked 이면 자동 오버레이 트리거.
+  // 무한 루프 방지: 60초 안에 한 번만.
+  (function () {
+    var origFetch = window.fetch;
+    if (!origFetch) return;
+    window.fetch = function (input, init) {
+      return origFetch.apply(this, arguments).then(function (res) {
+        try {
+          var url = (typeof input === "string") ? input : (input && input.url) || "";
+          if (url.indexOf("/api/cookie/refresh") !== -1) return res;  // 자기 자신
+          if (res.status !== 401 && res.status !== 403 && res.status !== 502) return res;
+          if (_autoRefreshInFlight) return res;
+          if (Date.now() - _lastAutoRefreshTs < 60000) return res;
+          var contentType = res.headers.get("Content-Type") || "";
+          if (contentType.indexOf("application/json") === -1) return res;
+          res.clone().json().then(function (body) {
+            var kind = body && body.error_kind;
+            if (kind === "cf_challenge" || kind === "blocked" || kind === "unknown") {
+              triggerCookieRefresh();
+            }
+          }).catch(function () {});
+        } catch (_) {}
+        return res;
+      });
+    };
+  })();
 
   // ---------- 홈 ----------
   // 첫 화면은 항상 이어보기 — 메인 카테고리에 가끔 선정적 썸네일이 섞이는 걸
@@ -1810,6 +1900,7 @@
     if (action === "save-nas") return saveNasAndContinue();
     if (action === "refresh-domain") return refreshSeedDomain();
     if (action === "refresh-cookie") return refreshCookie();
+    if (action === "refresh-cookie-fab") return triggerCookieRefresh();
     if (action === "refresh") return refreshCurrent();
     if (action === "back") return goBack();
     if (action === "fav-toggle") return toggleFavorite();

@@ -179,3 +179,45 @@ html, body {
 }
 .toast.danger { color: var(--danger); }
 .toast.ok { color: var(--ok); }
+
+/* ---- cf_clearance FAB + 오버레이 (모든 화면 공통) ---- */
+#cookie-refresh-fab {
+  position: fixed; top: 20px; right: 20px; z-index: 200;
+  padding: 10px 18px; border-radius: 24px;
+  background: var(--accent); color: #fff; border: 2px solid transparent;
+  font-size: 20px; font-weight: 600; cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+}
+#cookie-refresh-fab.focused { border-color: #fff; }
+#cookie-refresh-fab:hover { background: var(--accent-2); }
+
+#cookie-refresh-overlay {
+  position: fixed; inset: 0; z-index: 300;
+  background: rgba(0,0,0,0.88);
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+}
+#cookie-refresh-overlay.hidden { display: none; }
+.cr-box {
+  background: var(--panel, #1a1d24); border: 1px solid var(--border);
+  border-radius: 16px; padding: 32px 28px;
+  width: min(520px, 92vw); text-align: center;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.6);
+}
+.cr-icon { font-size: 64px; line-height: 1; margin-bottom: 18px; }
+.cr-spinner {
+  width: 60px; height: 60px; margin: 0 auto;
+  border: 6px solid rgba(255,255,255,0.15);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: cr-spin 0.9s linear infinite;
+}
+@keyframes cr-spin { to { transform: rotate(360deg); } }
+.cr-title { font-size: 26px; font-weight: 600; margin-bottom: 12px; }
+.cr-detail { font-size: 18px; color: var(--muted); line-height: 1.6; }
+.cr-detail code { font-size: 14px; }
+.cr-actions {
+  display: flex; gap: 12px; justify-content: center;
+  flex-wrap: wrap; margin-top: 24px;
+}
+.cr-actions.hidden { display: none; }

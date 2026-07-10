@@ -163,6 +163,31 @@
     </section>
 
     <div id="toast" class="toast hidden"></div>
+
+    <!-- 모든 화면 우상단 FAB — cf_clearance 즉시 발급 -->
+    <button type="button" id="cookie-refresh-fab" class="focusable"
+            data-action="refresh-cookie-fab"
+            title="NAS 자체 cf_clearance 발급 (5~15초)">
+      ⚡ 쿠키
+    </button>
+
+    <!-- 전체 화면 오버레이 (진행 중 / 결과) -->
+    <div id="cookie-refresh-overlay" class="hidden">
+      <div class="cr-box">
+        <div id="cr-icon" class="cr-icon">
+          <div class="cr-spinner"></div>
+        </div>
+        <div id="cr-title" class="cr-title">쿠키 갱신 중</div>
+        <div id="cr-detail" class="cr-detail">
+          NAS 안 flaresolverr 가 Chrome 띄워 Cloudflare 챌린지 통과 중…<br>
+          <strong>약 1분 이내 완료</strong>. 창을 닫지 마세요.
+        </div>
+        <div id="cr-actions" class="cr-actions hidden">
+          <button type="button" id="cr-confirm" class="btn focusable">확인 &amp; 새로고침</button>
+          <button type="button" id="cr-close" class="btn btn-secondary focusable">그냥 닫기</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script src="app.js"></script>

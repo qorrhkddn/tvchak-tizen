@@ -1,6 +1,6 @@
 {
   "name": "tvchak-tizen",
-  "version": "1.0.33",
+  "version": "1.0.34",
   "description": "TVChak client for Samsung Tizen TV via TizenBrew. Backend (NAS proxy) handles search, extraction and Referer injection.",
   "packageType": "app",
   "appName": "TVChak",

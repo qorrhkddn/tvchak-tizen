@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "1.0.33";
+  var APP_VERSION = "1.0.34";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -869,6 +869,9 @@
         closeBtn.textContent = "그냥 닫기";
       }
       actions.classList.remove("hidden");
+      // TV 리모컨: 결과 버튼에 자동 포커스. 성공 시 confirm, 실패면 close.
+      var preferred = (confirmBtn.style.display === "none") ? closeBtn : confirmBtn;
+      rebuildFocus(ov, preferred);
     })
     .catch(function (e) {
       icon.textContent = "✗";
@@ -879,6 +882,7 @@
       confirmBtn.style.display = "none";
       closeBtn.textContent = "닫기";
       actions.classList.remove("hidden");
+      rebuildFocus(ov, closeBtn);
     })
     .then(function () {
       _autoRefreshInFlight = false;
@@ -886,7 +890,13 @@
     });
 
     confirmBtn.onclick = function () { location.reload(); };
-    closeBtn.onclick = function () { ov.classList.add("hidden"); };
+    closeBtn.onclick = function () {
+      ov.classList.add("hidden");
+      // 오버레이 닫히면 원래 screen 의 포커스 복원
+      if (currentScreen && screens[currentScreen]) {
+        rebuildFocus(screens[currentScreen]);
+      }
+    };
   }
   window.triggerCookieRefresh = triggerCookieRefresh;
 

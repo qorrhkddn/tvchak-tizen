@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "1.0.34";
+  var APP_VERSION = "1.0.35";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -219,6 +219,7 @@
     FIT_MODE: "tvchak.fitMode",
     LAST_TAB: "tvchak.lastTab",
     PROFILE_ID: "tvchak.profileId",
+    RECENT_SORT: "tvchak.recentSort",
   };
 
   // ---- 프로필 기반 server-backed cache ----
@@ -235,6 +236,15 @@
   }
   function _setCurrentProfileId(id) {
     try { localStorage.setItem(KEYS.PROFILE_ID, JSON.stringify(id)); } catch (_) {}
+  }
+
+  function ensureHistoryAddedAt(items) {
+    items.forEach(function (h) {
+      if (typeof h.addedAt !== "number" || !isFinite(h.addedAt)) {
+        // 옛 기록은 최초 등록 시각이 없어 기존 시청 시각을 기준으로 고정한다.
+        h.addedAt = Number(h.updatedAt) || 0;
+      }
+    });
   }
 
   function loadProfile(pid) {
@@ -256,6 +266,7 @@
         .catch(function () { return null; }),
     ]).then(function (results) {
       profileCache.history = results[0] || [];
+      ensureHistoryAddedAt(profileCache.history);
       profileCache.favorites = results[1] || [];
       // history / favorites 는 server-only. 옛 localStorage 흔적 정리.
       try { localStorage.removeItem(KEYS.HISTORY); } catch (_) {}
@@ -956,6 +967,7 @@
       t.classList.toggle("active", t.dataset.tab === name);
     });
     document.getElementById("search-area").classList.toggle("hidden", name !== "search");
+    document.getElementById("recent-sort").classList.toggle("hidden", name !== "recent");
 
     // 탭 변경 → 진행 중 fetch 무효화 + 자동 로드 컨텍스트 초기화
     pendingClearAt = 0;
@@ -1134,8 +1146,28 @@
     });
   }
 
+  function getRecentSort() {
+    return STORE.get(KEYS.RECENT_SORT, "watched") === "added" ? "added" : "watched";
+  }
+
+  function sortHistory(items, mode) {
+    var key = mode === "added" ? "addedAt" : "updatedAt";
+    return items.slice().sort(function (a, b) {
+      return (b[key] || 0) - (a[key] || 0);
+    });
+  }
+
+  function setRecentSort(mode) {
+    STORE.set(KEYS.RECENT_SORT, mode);
+    renderRecentTab();
+  }
+
   function renderRecentTab() {
-    var items = STORE.get(KEYS.HISTORY, []).slice().reverse().slice(0, 60);
+    var mode = getRecentSort();
+    document.querySelectorAll("#recent-sort [role=radio]").forEach(function (btn) {
+      btn.setAttribute("aria-checked", String(btn.dataset.action === "recent-sort-" + mode));
+    });
+    var items = sortHistory(STORE.get(KEYS.HISTORY, []), mode).slice(0, 60);
     var mapped = items.map(function (h) {
       return {
         title: h.title,
@@ -1262,6 +1294,25 @@
     });
   }
 
+  function fitEpisodeNames() {
+    var names = document.querySelectorAll("#episode-list .ep-name");
+    names.forEach(function (name) {
+      name.style.fontSize = "";
+      name.style.whiteSpace = "nowrap";
+    });
+    var sizes = Array.prototype.map.call(names, function (name) {
+      var width = name.clientWidth;
+      var size = parseFloat(window.getComputedStyle(name).fontSize);
+      if (!width || name.scrollWidth <= width) return null;
+      return Math.max(Math.min(14, size), Math.floor(size * (width - 1) / name.scrollWidth));
+    });
+    names.forEach(function (name, i) {
+      if (sizes[i]) name.style.fontSize = sizes[i] + "px";
+      name.style.whiteSpace = "";
+    });
+  }
+  window.addEventListener("resize", fitEpisodeNames);
+
   function renderEpisodes(episodes) {
     var list = document.getElementById("episode-list");
     list.innerHTML = "";
@@ -1289,6 +1340,7 @@
       card.addEventListener("click", function () { playEpisode(ep); });
       list.appendChild(card);
     });
+    fitEpisodeNames();
 
     // 뒤로 버튼 / 즐겨찾기 / 이어보기 토글 — row=0,1
     document.querySelector('#screen-detail [data-action="back"]').dataset.row = "0";
@@ -1342,6 +1394,7 @@
         poster: (info && info.poster) || it.poster,
         poster_proxy_path: stripNasPrefix(it.poster_proxy_url || (info && info.poster_proxy_url)),
         episodes: {},
+        addedAt: Date.now(),
         updatedAt: Date.now(),
       });
       STORE.set(KEYS.HISTORY, hits);
@@ -1442,6 +1495,7 @@
           poster: (info && info.poster) || it.poster,
           poster_proxy_path: stripNasPrefix(it.poster_proxy_url || (info && info.poster_proxy_url)),
           episodes: {},
+          addedAt: Date.now(),
         };
         entry.episodes = entry.episodes || {};
         // 같은 회차가 이미 있으면 position 유지(재시청 흐름), 없으면 0부터
@@ -1660,6 +1714,7 @@
       poster: (info && info.poster) || it.poster,
       poster_proxy_path: stripNasPrefix(it.poster_proxy_url || (info && info.poster_proxy_url)),
       episodes: {},
+      addedAt: Date.now(),
     };
     // 카드(it)의 path가 있으면 무조건 그걸로 덮어쓴다 — v0.5.0의 잘못된 path를 정정.
     // 카드 path는 setCardImage가 캐시 키로 쓰는 값과 같아야 이어보기에서 cache hit.
@@ -1918,6 +1973,8 @@
     if (action === "back") return goBack();
     if (action === "fav-toggle") return toggleFavorite();
     if (action === "history-toggle") return toggleHistory();
+    if (action === "recent-sort-watched") return setRecentSort("watched");
+    if (action === "recent-sort-added") return setRecentSort("added");
     if (action === "swap-src") return swapPlayerSrc();
     if (action === "pip") return togglePictureInPicture();
     if (action === "add-profile") return addProfileApi();

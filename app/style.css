@@ -70,6 +70,9 @@ html, body {
 .title-area { margin: 0; font-size: 28px; }
 
 /* ---- 그리드 ---- */
+.recent-sort { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; font-size: 18px; }
+.recent-sort .btn { padding: 10px 16px; font-size: 18px; }
+.recent-sort [aria-checked="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
 .content {
   flex: 1;
   min-height: 0;
@@ -133,11 +136,11 @@ html, body {
 .ep-card {
   background: var(--panel); border: 2px solid transparent; border-radius: 10px;
   padding: 14px 16px; cursor: pointer; font-size: 20px;
-  display: flex; flex-direction: column; gap: 6px;
+  display: flex; flex-direction: column; gap: 6px; min-width: 0;
 }
 .ep-card.focused { border-color: var(--focus); }
 .ep-card .ep-num { font-size: 16px; color: var(--muted); }
-.ep-card .ep-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ep-card .ep-name { white-space: normal; overflow-wrap: break-word; word-break: break-word; }
 .ep-card .ep-progress {
   height: 7px; background: var(--panel-2); border-radius: 3px; overflow: hidden;
   margin-top: 6px;

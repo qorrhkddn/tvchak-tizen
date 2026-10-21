@@ -105,6 +105,15 @@
         <div class="hint">박스에 포커스 → OK로 TV 키보드 → 입력 후 Return으로 닫고 ↓로 검색 버튼.</div>
       </div>
 
+      <div id="recent-sort" class="recent-sort hidden" role="radiogroup" aria-label="이어보기 정렬">
+        <span class="muted">정렬</span>
+        <button class="btn btn-secondary focusable" data-action="recent-sort-watched"
+                data-row="1" data-col="0" role="radio" aria-checked="true">최근 시청순</button>
+        <button class="btn btn-secondary focusable" data-action="recent-sort-added"
+                data-row="1" data-col="1" role="radio" aria-checked="false"
+                title="최근 등록한 작품부터 표시">등록순</button>
+      </div>
+
       <main class="content">
         <div id="grid" class="grid"></div>
         <div id="grid-status" class="muted center"></div>

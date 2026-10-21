@@ -21,6 +21,8 @@ function load(names, overrides = {}) {
   const elements = new Map();
   const context = {
     API_CACHE_PREFIX: prefix, API_TIMEOUT_MS: 500,
+    cacheMenuId: null, closeCacheMenu: () => false,
+    screens: { home: {} }, currentScreen: "home", rebuildFocus: () => {},
     localStorage: { getItem: key => storage.get(key) || null, setItem: (key, value) => storage.set(key, value) },
     getCacheTtlMs: () => 86400000,
     nasUrl: () => "http://nas",
@@ -106,22 +108,27 @@ test("캐시 대상이 아닌 스트림 추출은 매번 네트워크로 조회�
 test("표시는 캐시·최신·캐시 혼합을 구분하고 조회 중과 실패 상태도 제공한다", () => {
   const ctx = load(["setCacheBadge"]);
   const badge = ctx.document.getElementById("badge");
+  const status = ctx.document.getElementById("badge-status");
+  const toggle = ctx.document.getElementById("badge-toggle");
   const ts = Date.now() - 60000;
   ctx.setCacheBadge("badge", "ready", [{ cached: true, ts }]);
   assert.equal(badge.dataset.state, "cached");
-  assert.match(badge.textContent, /^캐시 · /);
+  assert.match(status.textContent, /^캐시 · /);
+  assert.equal(toggle.textContent, "캐시 ▾");
+  assert.equal(badge.textContent, "최신화 ↻");
   ctx.setCacheBadge("badge", "ready", [{ cached: true, ts }, { cached: false, ts: Date.now() }]);
-  assert.match(badge.textContent, /^캐시 포함 · /);
+  assert.match(status.textContent, /^캐시 포함 · /);
   ctx.setCacheBadge("badge", "ready", [{ cached: false, ts }]);
   assert.equal(badge.dataset.state, "fresh");
-  assert.match(badge.textContent, /^최신 조회 · /);
+  assert.match(status.textContent, /^최신 조회 · /);
+  assert.equal(toggle.textContent, "최신 ▾");
   ctx.setCacheBadge("badge", "loading");
   assert.equal(badge["aria-busy"], "true");
   ctx.setCacheBadge("badge", "error");
   assert.equal(badge.dataset.state, "error");
   assert.equal(badge["aria-busy"], "false");
   ctx.setCacheBadge("badge");
-  assert.equal(badge.classList.contains("hidden"), true);
+  assert.equal(ctx.document.getElementById("badge-control").classList.contains("hidden"), true);
 });
 
 test("목록 최신화는 1페이지부터 다시 조회하고 추가 페이지도 캐시를 우회한다", async () => {
@@ -204,4 +211,65 @@ test("상세 출처는 최신 요청에만 갱신되고 재조회 실패를 최�
   pending[2].reject(new Error("네트워크 실패"));
   await settle();
   assert.equal(ctx.document.getElementById("detail-cache").dataset.state, "error");
+});
+
+test("상단 메뉴는 한 개만 열리고 닫을 때 포커스를 복원한다", () => {
+  const focus = [];
+  const ctx = load(["closeCacheMenu", "toggleCacheMenu"], {
+    rebuildFocus: (screen, preferred) => focus.push(preferred),
+  });
+  const action = ctx.document.getElementById("list-cache");
+  const toggle = ctx.document.getElementById("list-cache-toggle");
+  ctx.toggleCacheMenu("list-cache");
+  assert.equal(ctx.cacheMenuId, "list-cache");
+  assert.equal(ctx.document.getElementById("list-cache-menu").classList.contains("hidden"), false);
+  assert.equal(toggle["aria-expanded"], "true");
+  assert.equal(focus.at(-1), action);
+  ctx.toggleCacheMenu("detail-cache");
+  assert.equal(ctx.document.getElementById("list-cache-menu").classList.contains("hidden"), true);
+  assert.equal(ctx.cacheMenuId, "detail-cache");
+  ctx.toggleCacheMenu("detail-cache");
+  assert.equal(ctx.cacheMenuId, null);
+  assert.equal(focus.at(-1), ctx.document.getElementById("detail-cache-toggle"));
+  assert.equal(ctx.closeCacheMenu(true), false);
+});
+
+test("리모컨 뒤로 가기는 화면을 나가지 않고 펼친 메뉴부터 닫는다", () => {
+  const ctx = load(["closeCacheMenu", "toggleCacheMenu", "onBack"]);
+  ctx.toggleCacheMenu("list-cache");
+  assert.equal(ctx.onBack(), true);
+  assert.equal(ctx.cacheMenuId, null);
+  assert.equal(ctx.currentScreen, "home");
+  assert.equal(ctx.document.getElementById("list-cache-toggle")["aria-expanded"], "false");
+});
+
+test("조회 중에는 메뉴의 중복 최신화 요청을 보내지 않는다", () => {
+  let refreshes = 0;
+  const ctx = load(["handleAction"], { refreshCurrent: () => refreshes++ });
+  ctx.cacheMenuId = "list-cache";
+  ctx.document.getElementById("list-cache").dataset.state = "loading";
+  ctx.handleAction("refresh-cache");
+  assert.equal(refreshes, 0);
+  ctx.document.getElementById("list-cache").dataset.state = "cached";
+  ctx.handleAction("refresh-cache");
+  assert.equal(refreshes, 1);
+});
+
+test("쿠키 버튼은 상세 우측 도구 모음에 배치되고 재생 중에는 숨긴다", () => {
+  const fab = element();
+  let parent;
+  const actions = { appendChild: value => { assert.equal(value, fab); parent = "header"; } };
+  const app = { appendChild: value => { assert.equal(value, fab); parent = "app"; } };
+  const ctx = load(["onScreenEnter"], {
+    detailState: null,
+    screens: { detail: { querySelector: () => actions }, player: { querySelector: () => null } },
+    document: { getElementById: id => id === "cookie-refresh-fab" ? fab : app },
+  });
+  ctx.onScreenEnter("detail");
+  assert.equal(parent, "header");
+  assert.equal(fab.style.display, "");
+  assert.equal(fab.dataset.row, "0");
+  ctx.onScreenEnter("player");
+  assert.equal(parent, "app");
+  assert.equal(fab.style.display, "none");
 });

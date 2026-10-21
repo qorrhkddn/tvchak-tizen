@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "1.0.36";
+  var APP_VERSION = "1.0.37";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -105,22 +105,53 @@
     try { localStorage.removeItem(API_CACHE_PREFIX + path); } catch (_) {}
   }
 
+  var cacheMenuId = null;
+
+  function closeCacheMenu(restoreFocus) {
+    if (!cacheMenuId) return false;
+    var id = cacheMenuId;
+    cacheMenuId = null;
+    var toggle = document.getElementById(id + "-toggle");
+    document.getElementById(id + "-menu").classList.add("hidden");
+    toggle.setAttribute("aria-expanded", "false");
+    if (screens[currentScreen]) rebuildFocus(screens[currentScreen], restoreFocus ? toggle : null);
+    return true;
+  }
+
+  function toggleCacheMenu(id) {
+    if (cacheMenuId === id) { closeCacheMenu(true); return; }
+    closeCacheMenu(false);
+    document.getElementById(id + "-menu").classList.remove("hidden");
+    document.getElementById(id + "-toggle").setAttribute("aria-expanded", "true");
+    cacheMenuId = id;
+    rebuildFocus(screens[currentScreen], document.getElementById(id));
+  }
+
   function setCacheBadge(id, state, sources) {
     var badge = document.getElementById(id);
+    var control = document.getElementById(id + "-control");
+    var toggle = document.getElementById(id + "-toggle");
+    var status = document.getElementById(id + "-status");
+    if (!badge || !control || !toggle || !status) return;
     if (!state) {
-      badge.classList.add("hidden");
+      control.classList.add("hidden");
+      if (cacheMenuId === id) closeCacheMenu(false);
       return;
     }
-    badge.classList.remove("hidden");
-    badge.dataset.state = state;
+    control.classList.remove("hidden");
+    control.dataset.state = badge.dataset.state = state;
     badge.setAttribute("aria-busy", String(state === "loading"));
     badge.title = "캐시를 건너뛰고 최신 데이터를 다시 조회합니다.";
     if (state === "loading") {
-      badge.textContent = "최신 데이터 조회 중…";
+      toggle.textContent = "조회 중 ▾";
+      status.textContent = "최신 데이터 조회 중…";
+      badge.textContent = "조회 중…";
       return;
     }
     if (state === "error") {
-      badge.textContent = "조회 실패 · 눌러 다시 시도 ↻";
+      toggle.textContent = "실패 ▾";
+      status.textContent = "데이터 조회에 실패했습니다.";
+      badge.textContent = "다시 시도 ↻";
       return;
     }
     var cached = sources.filter(function (s) { return s.cached; });
@@ -128,9 +159,11 @@
     var date = new Date(Math.min.apply(null, times));
     var time = (date.getMonth() + 1) + "/" + date.getDate() + " "
       + ("0" + date.getHours()).slice(-2) + ":" + ("0" + date.getMinutes()).slice(-2);
-    badge.dataset.state = cached.length ? "cached" : "fresh";
+    control.dataset.state = badge.dataset.state = cached.length ? "cached" : "fresh";
+    toggle.textContent = cached.length ? "캐시 ▾" : "최신 ▾";
     var label = cached.length ? (cached.length === sources.length ? "캐시" : "캐시 포함") : "최신 조회";
-    badge.textContent = label + " · " + time + " · 눌러 최신화 ↻";
+    status.textContent = label + " · " + time;
+    badge.textContent = "최신화 ↻";
   }
 
   // ---------- TizenBrew TVInputDevice ----------
@@ -545,6 +578,7 @@
     return "#" + name;
   }
   function show(name, push) {
+    closeCacheMenu(false);
     Object.keys(screens).forEach(function (k) { screens[k].classList.add("hidden"); });
     screens[name].classList.remove("hidden");
     if (push !== false && currentScreen && currentScreen !== name) {
@@ -1948,9 +1982,15 @@
   // 포커스만 home 컨테이너 기준으로 다시 잡는다. 이 단계가 빠지면
   // focus.items가 이전 화면(detail/player)의 요소를 들고 있어 키 입력이 먹지 않는다.
   function onScreenEnter(name) {
-    // 플레이어 화면에서는 우상단 FAB 이 영상을 가리므로 숨김. 다른 화면에선 표시.
+    // 목록·상세에서는 쿠키 버튼도 상단 우측으로 모으고, 재생 중에는 숨긴다.
     var fab = document.getElementById("cookie-refresh-fab");
-    if (fab) fab.style.display = (name === "player") ? "none" : "";
+    if (fab) {
+      var actions = screens[name].querySelector(".nav-actions");
+      (actions || document.getElementById("app")).appendChild(fab);
+      fab.dataset.row = "0";
+      fab.dataset.col = "10";
+      fab.style.display = (name === "player") ? "none" : "";
+    }
     if (name === "settings") renderSettings();
     if (name === "detail" && detailState && detailState.item) {
       // player → back으로 돌아왔을 때 history가 새로 추가됐을 수 있다.
@@ -2009,6 +2049,7 @@
 
   // ---------- 클릭 / 액션 핸들러 ----------
   document.addEventListener("click", function (e) {
+    if (cacheMenuId && !e.target.closest(".cache-control")) closeCacheMenu(false);
     var el = e.target.closest(".focusable");
     if (el) setFocus(el);
     var act = e.target.closest("[data-action]");
@@ -2038,6 +2079,12 @@
     if (action === "refresh-cookie") return refreshCookie();
     if (action === "refresh-cookie-fab") return triggerCookieRefresh();
     if (action === "refresh") return refreshCurrent();
+    if (action === "list-cache-toggle") return toggleCacheMenu("list-cache");
+    if (action === "detail-cache-toggle") return toggleCacheMenu("detail-cache");
+    if (action === "refresh-cache") {
+      if (cacheMenuId && document.getElementById(cacheMenuId).dataset.state === "loading") return;
+      return refreshCurrent();
+    }
     if (action === "back") return goBack();
     if (action === "fav-toggle") return toggleFavorite();
     if (action === "history-toggle") return toggleHistory();
@@ -2302,6 +2349,7 @@
   // 반환값: true면 우리가 처리했으니 default 동작(앱 종료/TizenBrew 복귀) 차단,
   //        false면 default 흘려보내서 TizenBrew 메인 메뉴로 나가게 한다.
   function onBack() {
+    if (closeCacheMenu(true)) return true;
     // NAS 주소 미설정 상태에선 설정에 머물게 함
     if (currentScreen === "settings" && !nasUrl()) { return true; }
 
@@ -2337,6 +2385,7 @@
     showOverlayBriefly();
   }
   function refreshCurrent() {
+    closeCacheMenu(true);
     // 캐시 무시하고 현재 화면을 다시 불러온다.
     if (currentScreen === "home") {
       if (homeState.tab.indexOf("cat-") === 0) {

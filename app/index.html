@@ -89,9 +89,22 @@
           <div class="spacer"></div>
           <div class="seed-info" id="app-version">v?</div>
           <div class="seed-info" id="seed-info"></div>
-          <div class="tab focusable" data-action="refresh" title="새로고침 (파란 키)">↻</div>
-          <div class="tab focusable" data-tab="settings" title="설정">⚙</div>
         </nav>
+        <div class="nav-actions">
+          <div id="list-cache-control" class="cache-control hidden">
+            <button id="list-cache-toggle" class="cache-toggle focusable" data-action="list-cache-toggle"
+                    data-row="0" data-col="7" aria-expanded="false" aria-controls="list-cache-menu">캐시 ▾</button>
+            <div id="list-cache-menu" class="cache-menu hidden">
+              <div id="list-cache-status" class="cache-status" aria-live="polite"></div>
+              <button id="list-cache" class="cache-badge focusable" data-action="refresh-cache"
+                      data-row="1" data-col="7">최신화 ↻</button>
+            </div>
+          </div>
+          <button class="nav-icon focusable" data-action="refresh" data-row="0" data-col="8"
+                  title="새로고침 (파란 키)" aria-label="새로고침">↻</button>
+          <button class="nav-icon focusable" data-tab="settings" data-row="0" data-col="9"
+                  title="설정" aria-label="설정">⚙</button>
+        </div>
       </header>
 
       <!-- 검색 입력 영역 (검색 탭 진입 시 노출) -->
@@ -114,9 +127,6 @@
                 title="최근 등록한 작품부터 표시">등록순</button>
       </div>
 
-      <button id="list-cache" class="cache-badge focusable hidden" data-action="refresh"
-              data-row="1" data-col="2" aria-live="polite"></button>
-
       <main class="content">
         <div id="grid" class="grid"></div>
         <div id="grid-status" class="muted center"></div>
@@ -128,14 +138,23 @@
       <header class="top-bar small">
         <button class="btn btn-secondary focusable" data-action="back">← 뒤로</button>
         <h2 id="detail-title" class="title-area"></h2>
+        <div class="nav-actions">
+          <div id="detail-cache-control" class="cache-control hidden">
+            <button id="detail-cache-toggle" class="cache-toggle focusable" data-action="detail-cache-toggle"
+                    data-row="0" data-col="1" aria-expanded="false" aria-controls="detail-cache-menu">캐시 ▾</button>
+            <div id="detail-cache-menu" class="cache-menu hidden">
+              <div id="detail-cache-status" class="cache-status" aria-live="polite"></div>
+              <button id="detail-cache" class="cache-badge focusable" data-action="refresh-cache"
+                      data-row="1" data-col="2">최신화 ↻</button>
+            </div>
+          </div>
+        </div>
       </header>
       <main class="detail-body">
         <div class="detail-left">
           <img id="detail-poster" src="" alt="">
         </div>
         <div class="detail-right">
-          <button id="detail-cache" class="cache-badge focusable hidden" data-action="refresh"
-                  data-row="0" data-col="1" aria-live="polite"></button>
           <p id="detail-plot" class="muted"></p>
           <div class="row" style="margin-bottom: 12px;">
             <button class="btn focusable" data-action="fav-toggle" id="fav-btn">즐겨찾기 추가</button>
@@ -178,7 +197,7 @@
 
     <div id="toast" class="toast hidden"></div>
 
-    <!-- 모든 화면 우상단 FAB — cf_clearance 즉시 발급 -->
+    <!-- 공통 쿠키 버튼 — 목록·상세에서는 상단 우측 도구 모음에 배치 -->
     <button type="button" id="cookie-refresh-fab" class="focusable"
             data-action="refresh-cookie-fab"
             title="NAS 자체 cf_clearance 발급 (5~15초)">

@@ -48,6 +48,16 @@ html, body {
   cursor: pointer;
 }
 .btn-secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
+.cache-badge {
+  align-self: flex-start; flex-shrink: 0; max-width: 100%; margin-bottom: 12px;
+  background: var(--panel-2); color: var(--muted); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 14px; font: inherit; font-size: 16px;
+  text-align: left; cursor: pointer;
+}
+.cache-badge[data-state="cached"] { color: var(--focus); }
+.cache-badge[data-state="fresh"] { color: var(--ok); }
+.cache-badge[data-state="error"] { color: var(--danger); }
+.cache-badge[data-state="loading"] { cursor: progress; }
 
 .hint { color: var(--muted); font-size: 18px; margin: 8px 0 16px; }
 

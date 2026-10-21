@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "1.0.35";
+  var APP_VERSION = "1.0.36";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -56,7 +56,7 @@
       if (!v) return null;
       var parsed = JSON.parse(v);
       if (!parsed || (Date.now() - (parsed.ts || 0)) > getCacheTtlMs()) return null;
-      return parsed.data;
+      return parsed;
     } catch (e) { return null; }
   }
   function cacheWrite(path, data) {
@@ -103,6 +103,34 @@
   }
   function cacheInvalidate(path) {
     try { localStorage.removeItem(API_CACHE_PREFIX + path); } catch (_) {}
+  }
+
+  function setCacheBadge(id, state, sources) {
+    var badge = document.getElementById(id);
+    if (!state) {
+      badge.classList.add("hidden");
+      return;
+    }
+    badge.classList.remove("hidden");
+    badge.dataset.state = state;
+    badge.setAttribute("aria-busy", String(state === "loading"));
+    badge.title = "캐시를 건너뛰고 최신 데이터를 다시 조회합니다.";
+    if (state === "loading") {
+      badge.textContent = "최신 데이터 조회 중…";
+      return;
+    }
+    if (state === "error") {
+      badge.textContent = "조회 실패 · 눌러 다시 시도 ↻";
+      return;
+    }
+    var cached = sources.filter(function (s) { return s.cached; });
+    var times = (cached.length ? cached : sources).map(function (s) { return s.ts; });
+    var date = new Date(Math.min.apply(null, times));
+    var time = (date.getMonth() + 1) + "/" + date.getDate() + " "
+      + ("0" + date.getHours()).slice(-2) + ":" + ("0" + date.getMinutes()).slice(-2);
+    badge.dataset.state = cached.length ? "cached" : "fresh";
+    var label = cached.length ? (cached.length === sources.length ? "캐시" : "캐시 포함") : "최신 조회";
+    badge.textContent = label + " · " + time + " · 눌러 최신화 ↻";
   }
 
   // ---------- TizenBrew TVInputDevice ----------
@@ -697,11 +725,17 @@
     // 캐시 (bypass 옵션 없을 때만)
     if (_isCacheablePath(path) && !opts.bypass) {
       var cached = cacheRead(path);
-      if (cached) return Promise.resolve(cached);
+      if (cached && cached.data) {
+        if (opts.source) {
+          opts.source.cached = true;
+          opts.source.ts = cached.ts;
+        }
+        return Promise.resolve(cached.data);
+      }
     }
 
     var controller = null;
-    var fetchOpts = {};
+    var fetchOpts = { cache: "no-store" };
     if (typeof AbortController !== "undefined") {
       controller = new AbortController();
       fetchOpts.signal = controller.signal;
@@ -725,6 +759,10 @@
           try {
             var parsed = JSON.parse(t);
             if (doCache) cacheWrite(path, parsed);
+            if (opts.source) {
+              opts.source.cached = false;
+              opts.source.ts = Date.now();
+            }
             return parsed;
           }
           catch (e) { throw new Error("JSON 파싱 실패: " + t.slice(0, 80)); }
@@ -968,6 +1006,7 @@
     });
     document.getElementById("search-area").classList.toggle("hidden", name !== "search");
     document.getElementById("recent-sort").classList.toggle("hidden", name !== "recent");
+    setCacheBadge("list-cache");
 
     // 탭 변경 → 진행 중 fetch 무효화 + 자동 로드 컨텍스트 초기화
     pendingClearAt = 0;
@@ -1070,25 +1109,34 @@
   }
 
   function loadCategoryFirst(bypass) {
+    listState.page = 1;
+    listState.hasMore = false;
+    listState.bypass = !!bypass;
+    listState.sources = [];
+    setCacheBadge("list-cache", "loading");
     document.getElementById("grid-status").textContent = "불러오는 중...";
     document.getElementById("grid").innerHTML = "";
     listState.itemCount = 0;
     listState.loading = true;
     listState.token = newApiToken();
     var token = listState.token;
+    var source = {};
     apiGet("/api/mainpage?cat=" + listState.cat + "&page=" + listState.page,
-           { bypass: bypass })
+           { bypass: bypass, source: source })
       .then(function (j) {
         if (token !== listState.token) return;   // 사이에 탭 바뀌면 무시
         listState.loading = false;
         var items = j.items || [];
         listState.hasMore = items.length >= 12;
+        listState.sources = [source];
+        setCacheBadge("list-cache", "ready", listState.sources);
         renderGrid(items, openDetail);
       })
       .catch(function (e) {
         if (token !== listState.token) return;
         listState.loading = false;
         document.getElementById("grid-status").textContent = "실패: " + e.message;
+        setCacheBadge("list-cache", "error");
       });
   }
 
@@ -1097,9 +1145,11 @@
     listState.loading = true;
     listState.page += 1;
     var token = listState.token;  // 동일 토큰 유지 — 같은 탭의 연속 요청
+    var source = {};
     document.getElementById("grid-status").textContent =
       "더 불러오는 중... (페이지 " + listState.page + ")";
-    apiGet("/api/mainpage?cat=" + listState.cat + "&page=" + listState.page)
+    apiGet("/api/mainpage?cat=" + listState.cat + "&page=" + listState.page,
+           { bypass: listState.bypass, source: source })
       .then(function (j) {
         if (token !== listState.token) return;
         listState.loading = false;
@@ -1110,6 +1160,8 @@
           return;
         }
         if (items.length < 12) listState.hasMore = false;
+        listState.sources.push(source);
+        setCacheBadge("list-cache", "ready", listState.sources);
         appendToGrid(items, openDetail);
         document.getElementById("grid-status").textContent =
           listState.hasMore ? "" : "마지막 페이지입니다.";
@@ -1137,12 +1189,20 @@
     var q = inputValue("search-input").trim();
     if (!q) { toast("검색어를 입력하세요", "danger"); return; }
     document.getElementById("grid-status").textContent = "검색 중: " + q;
-    apiGet("/api/search?q=" + encodeURIComponent(q), { bypass: bypass }).then(function (j) {
+    var token = newApiToken();
+    listState.token = token;
+    var source = {};
+    setCacheBadge("list-cache", "loading");
+    apiGet("/api/search?q=" + encodeURIComponent(q), { bypass: bypass, source: source }).then(function (j) {
+      if (token !== listState.token) return;
+      setCacheBadge("list-cache", "ready", [source]);
       // user 가 검색창 typing 중이면 결과 받아도 rebuild 안 함 (iOS 키보드 보호)
       var typing = _userIsTypingInInput();
       renderGrid(j.items || [], openDetail, typing ? { noRebuildFocus: true } : undefined);
     }).catch(function (e) {
+      if (token !== listState.token) return;
       document.getElementById("grid-status").textContent = "검색 실패: " + e.message;
+      setCacheBadge("list-cache", "error");
     });
   }
 
@@ -1243,7 +1303,10 @@
       homeState.lastWindowScrollY = window.scrollY || 0;
     }
     detailState = { item: item, info: null, historyHit: historyHit || findHistory(item.url) };
+    var state = detailState;
+    var source = {};
     show("detail");
+    setCacheBadge("detail-cache", "loading");
     document.getElementById("detail-title").textContent = item.title || "";
     var posterEl = document.getElementById("detail-poster");
     var detailCacheKey = stripNasPrefix(item.poster_proxy_url || item.poster || "");
@@ -1262,10 +1325,13 @@
     document.getElementById("history-btn").dataset.row = "1";
     document.getElementById("history-btn").dataset.col = "1";
     updateHistoryButton();
+    if (focus.current) focus.current.classList.remove("focused");
     focus.current = null;
     rebuildFocus(screens.detail);
 
-    apiGet("/api/detail?u=" + encodeURIComponent(item.url), { bypass: bypass }).then(function (j) {
+    apiGet("/api/detail?u=" + encodeURIComponent(item.url), { bypass: bypass, source: source }).then(function (j) {
+      if (detailState !== state) return;
+      setCacheBadge("detail-cache", "ready", [source]);
       detailState.info = j;
       document.getElementById("detail-title").textContent = j.title || item.title || "";
       document.getElementById("detail-plot").textContent = j.plot || "";
@@ -1290,7 +1356,9 @@
         }
       }
     }).catch(function (e) {
+      if (detailState !== state) return;
       document.getElementById("detail-plot").textContent = "실패: " + e.message;
+      setCacheBadge("detail-cache", "error");
     });
   }
 

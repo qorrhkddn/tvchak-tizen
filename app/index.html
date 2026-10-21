@@ -114,6 +114,9 @@
                 title="최근 등록한 작품부터 표시">등록순</button>
       </div>
 
+      <button id="list-cache" class="cache-badge focusable hidden" data-action="refresh"
+              data-row="1" data-col="2" aria-live="polite"></button>
+
       <main class="content">
         <div id="grid" class="grid"></div>
         <div id="grid-status" class="muted center"></div>
@@ -131,6 +134,8 @@
           <img id="detail-poster" src="" alt="">
         </div>
         <div class="detail-right">
+          <button id="detail-cache" class="cache-badge focusable hidden" data-action="refresh"
+                  data-row="0" data-col="1" aria-live="polite"></button>
           <p id="detail-plot" class="muted"></p>
           <div class="row" style="margin-bottom: 12px;">
             <button class="btn focusable" data-action="fav-toggle" id="fav-btn">즐겨찾기 추가</button>

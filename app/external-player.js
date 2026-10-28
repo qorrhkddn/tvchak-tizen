@@ -148,7 +148,7 @@
       state.phase = "preparing";
       state.selected = playUrl;
       state.ready = null;
-      state.message = "재생 주소를 준비하고 있습니다…";
+      state.message = "NAS가 원본 사이트에서 영상 주소를 추출하고 있습니다…";
       emit();
       var pending;
       try { pending = api.prepareExternalPlayback(playUrl); }

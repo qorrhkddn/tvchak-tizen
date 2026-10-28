@@ -8,7 +8,7 @@
   "use strict";
 
   // NAS에서 제공되는 웹 UI 버전. TV 실행기의 package.json 버전과 독립적.
-  var APP_VERSION = "1.1.1";
+  var APP_VERSION = "1.1.2";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -44,7 +44,8 @@
     if (path.indexOf("/api/diag") === 0) return false;
     // /api/extract 는 한때 캐시 대상이었지만, BunnyCDN이 token-signed URL을
     // 발급하고 짧은 시간(보통 수십분) 후 무효화시키므로 캐시된 video_url 로
-    // 시간 후 재생하면 BunnyCDN이 404. 매번 fresh extract하도록 제외.
+    // 시간 후 재생하면 BunnyCDN이 404. 장기 캐시에서는 제외하고 아래의
+    // getPlaybackSource가 최근 30초 결과와 진행 중 요청만 메모리에서 재사용한다.
     if (path.indexOf("/api/extract") === 0) return false;
     return path.indexOf("/api/") === 0;
   }
@@ -1574,6 +1575,54 @@
     showOverlayBriefly();
   }
 
+  var PLAYBACK_SOURCE_TTL_MS = 30000;
+  var playbackSources = Object.create(null);
+
+  function playbackProxyUrl(result) {
+    var nas = new URL(nasUrl());
+    var url = new URL(result.proxy_url || result.proxy_path || "", nas.href);
+    if ((url.protocol !== "http:" && url.protocol !== "https:") || url.origin !== nas.origin
+        || url.pathname !== "/proxy" || url.username || url.password) {
+      throw new Error("NAS 프록시 재생 주소가 없습니다.");
+    }
+    return url.href;
+  }
+
+  function getPlaybackSource(playUrl, force) {
+    var now = Date.now();
+    var key = (nasUrl() || "").replace(/\/$/, "") + "|" + playUrl;
+    Object.keys(playbackSources).forEach(function (name) {
+      var source = playbackSources[name];
+      var age = now - source.ts;
+      if (!source.pending && (age < 0 || age >= PLAYBACK_SOURCE_TTL_MS)) delete playbackSources[name];
+    });
+    var cached = playbackSources[key];
+    if (!force && cached) {
+      if (cached.pending) return cached.pending;
+      if (cached.result) return Promise.resolve(cached.result);
+    }
+    var entry = { ts: 0, result: null, pending: null };
+    playbackSources[key] = entry;
+    var request;
+    try { request = apiGet("/api/extract?u=" + encodeURIComponent(playUrl), { bypass: true }); }
+    catch (error) { delete playbackSources[key]; return Promise.reject(error); }
+    entry.pending = Promise.resolve(request).then(function (result) {
+      if (!result || result.error) throw new Error(result && result.error || "재생 주소 응답이 없습니다.");
+      playbackProxyUrl(result);
+      // 강제 갱신을 시작한 뒤 도착한 이전 응답은 새 캐시를 덮지 않는다.
+      if (playbackSources[key] === entry) {
+        entry.ts = Date.now();
+        entry.result = result;
+        entry.pending = null;
+      }
+      return result;
+    }).catch(function (error) {
+      if (playbackSources[key] === entry) delete playbackSources[key];
+      throw error;
+    });
+    return entry.pending;
+  }
+
   function rememberEpisode(ep) {
     if (!detailState || !detailState.item) return false;
     try {
@@ -1618,16 +1667,9 @@
     var ep = details && details.episodes.find(function (item) { return item.play_url === playUrl; });
     if (!ep) return Promise.reject(new Error("현재 상세 화면의 회차를 선택하세요."));
     var state = detailState;
-    return apiGet("/api/extract?u=" + encodeURIComponent(playUrl), { bypass: true }).then(function (result) {
+    return getPlaybackSource(playUrl).then(function (result) {
       if (state !== detailState || currentScreen !== "detail") throw new Error("상세 화면이 변경되었습니다.");
-      if (result.error) throw new Error(result.error);
-      var nas = new URL(nasUrl());
-      var url = new URL(result.proxy_url || result.proxy_path || "", nas.href);
-      if ((url.protocol !== "http:" && url.protocol !== "https:") || url.origin !== nas.origin
-          || url.pathname !== "/proxy" || url.username || url.password) {
-        throw new Error("NAS 프록시 재생 주소가 없습니다.");
-      }
-      return { url: url.href, detailUrl: details.detailUrl, episode: ep };
+      return { url: playbackProxyUrl(result), detailUrl: details.detailUrl, episode: ep };
     });
   }
 
@@ -1660,7 +1702,7 @@
     // 실패·외부 iframe 전환 전에도 회차를 남기고, 정상 재생 중에는 위치를 갱신한다.
     rememberEpisode(ep);
 
-    apiGet("/api/extract?u=" + encodeURIComponent(ep.play_url), { bypass: bypass }).then(function (j) {
+    getPlaybackSource(ep.play_url, bypass).then(function (j) {
       if (j.error) throw new Error(j.error);
       // 1차: NAS proxy 경유 — 대부분의 호스트(wiselife.blog, BunnyCDN 등)는
       // proxy 의 referer 박힘이 anti-hotlink 통과에 필요. 실패하는 일부 케이스
@@ -2429,6 +2471,7 @@
   }
   function refreshCurrent() {
     closeCacheMenu(true);
+    playbackSources = Object.create(null);
     // 캐시 무시하고 현재 화면을 다시 불러온다.
     if (currentScreen === "home") {
       if (homeState.tab.indexOf("cat-") === 0) {

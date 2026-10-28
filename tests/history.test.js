@@ -115,7 +115,7 @@ function playback(overrides = {}) {
     updateHistoryButton: () => {},
     show: () => {},
     applyFitMode: () => {},
-    apiGet: () => new Promise(() => {}),
+    getPlaybackSource: () => new Promise(() => {}),
     ...overrides,
   });
 }
@@ -292,8 +292,8 @@ test("날짜나 일반 이름뿐인 항목은 추정 회차 단축키로 재생�
 
 function externalPlayback(overrides = {}) {
   const flushes = [], cleared = [];
-  const ctx = load(["rememberEpisode", "findHistory", "getExternalEpisodes", "prepareExternalPlayback", "recordExternalPlayback"], {
-    URL, currentScreen: "detail",
+  const ctx = load(["rememberEpisode", "findHistory", "getExternalEpisodes", "playbackProxyUrl", "getPlaybackSource", "prepareExternalPlayback", "recordExternalPlayback"], {
+    URL, currentScreen: "detail", playbackSources: Object.create(null), PLAYBACK_SOURCE_TTL_MS: 30000,
     detailState: { item: { url: "/show", title: "작품" }, info: { episodes: [
       { name: "4", episode: 1, play_url: "/play/4" },
     ] } },
@@ -382,4 +382,107 @@ test("외부 앱 전환 시 작은 기록만 keepalive로 전송한다", () => {
   ctx.profileCache.history = [];
   ctx._pushHistory();
   assert.equal(requests[2].keepalive, undefined);
+});
+
+function sourceCache(overrides = {}) {
+  const requests = [];
+  let ctx;
+  ctx = load(["playbackProxyUrl", "getPlaybackSource"], {
+    URL, playbackSources: Object.create(null), PLAYBACK_SOURCE_TTL_MS: 30000,
+    nasUrl: () => "http://nas.test:7777",
+    apiGet: (path, opts) => {
+      requests.push({ path, opts });
+      return Promise.resolve({ proxy_url: ctx.nasUrl() + "/proxy?u=" + requests.length });
+    },
+    ...overrides,
+  });
+  return { ctx, requests };
+}
+
+test("같은 회차의 진행 중 추출은 한 번만 요청하고 Promise를 공유한다", async () => {
+  let resolve, calls = 0;
+  const { ctx } = sourceCache({ apiGet: () => {
+    calls++;
+    return new Promise(done => { resolve = done; });
+  } });
+  const first = ctx.getPlaybackSource("/play/4");
+  const second = ctx.getPlaybackSource("/play/4");
+  assert.equal(first, second);
+  assert.equal(calls, 1);
+  resolve({ proxy_url: "http://nas.test:7777/proxy?u=video" });
+  assert.equal(await first, await second);
+});
+
+test("최근 30초 결과는 재사용하되 만료되면 새 영상 주소를 추출한다", async () => {
+  const { ctx, requests } = sourceCache();
+  const first = await ctx.getPlaybackSource("/play/4");
+  assert.equal(await ctx.getPlaybackSource("/play/4"), first);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].opts.bypass, true);
+  ctx.Date.now = () => 31000;
+  const next = await ctx.getPlaybackSource("/play/4");
+  assert.notEqual(next, first);
+  assert.equal(requests.length, 2);
+});
+
+test("강제 재시도는 최근 주소도 무시하고 새 주소를 준비한다", async () => {
+  const { ctx, requests } = sourceCache();
+  await ctx.getPlaybackSource("/play/4");
+  const forced = await ctx.getPlaybackSource("/play/4", true);
+  assert.equal(requests.length, 2);
+  assert.equal(await ctx.getPlaybackSource("/play/4"), forced);
+  assert.equal(requests.length, 2);
+});
+
+test("강제 갱신 뒤 늦게 도착한 이전 응답은 최신 메모리 캐시를 덮지 않는다", async () => {
+  const pending = [];
+  const { ctx } = sourceCache({ apiGet: () => new Promise(resolve => pending.push(resolve)) });
+  const old = ctx.getPlaybackSource("/play/4");
+  const fresh = ctx.getPlaybackSource("/play/4", true);
+  pending[1]({ proxy_url: "http://nas.test:7777/proxy?u=fresh" });
+  const latest = await fresh;
+  pending[0]({ proxy_url: "http://nas.test:7777/proxy?u=old" });
+  await old;
+  assert.equal(await ctx.getPlaybackSource("/play/4"), latest);
+  assert.equal(pending.length, 2);
+});
+
+test("네트워크 오류·추출 오류·잘못된 프록시 결과는 재사용하지 않는다", async () => {
+  let calls = 0;
+  const { ctx } = sourceCache({ apiGet: () => {
+    calls++;
+    if (calls === 1) return Promise.reject(new Error("원본 서버 오류"));
+    if (calls === 2) return Promise.resolve({ error: "추출 실패" });
+    if (calls === 3) return Promise.resolve({ proxy_url: "https://evil.test/proxy?u=video" });
+    return Promise.resolve({ proxy_url: "http://nas.test:7777/proxy?u=valid" });
+  } });
+  await assert.rejects(ctx.getPlaybackSource("/play/4"), /원본 서버 오류/);
+  await assert.rejects(ctx.getPlaybackSource("/play/4"), /추출 실패/);
+  await assert.rejects(ctx.getPlaybackSource("/play/4"), /NAS 프록시/);
+  assert.match((await ctx.getPlaybackSource("/play/4")).proxy_url, /valid/);
+  assert.equal(calls, 4);
+});
+
+test("NAS와 회차가 달라지거나 시계가 뒤로 가면 이전 주소를 재사용하지 않는다", async () => {
+  const { ctx, requests } = sourceCache();
+  await ctx.getPlaybackSource("/play/4");
+  ctx.nasUrl = () => "http://other-nas.test:7777";
+  await ctx.getPlaybackSource("/play/4");
+  await ctx.getPlaybackSource("/play/3");
+  assert.equal(requests.length, 3);
+  ctx.Date.now = () => 999;
+  await ctx.getPlaybackSource("/play/3");
+  assert.equal(requests.length, 4);
+});
+
+test("상단 강제 최신화는 재생 주소 메모리도 비우고 상세를 다시 조회한다", () => {
+  let bypass;
+  const ctx = load(["refreshCurrent"], {
+    currentScreen: "detail", detailState: { item: { url: "/show" }, historyHit: null },
+    playbackSources: { old: { result: {} } }, closeCacheMenu: () => {},
+    openDetail: (item, hit, force) => { bypass = force; },
+  });
+  ctx.refreshCurrent();
+  assert.equal(Object.keys(ctx.playbackSources).length, 0);
+  assert.equal(bypass, true);
 });

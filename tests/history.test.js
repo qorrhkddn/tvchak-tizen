@@ -183,3 +183,101 @@ test("회차 글꼴은 폭에 맞춰 축소하되 최소 크기와 줄바꿈을 
   ctx.fitEpisodeNames();
   assert.equal(names[0].style.fontSize, "");
 });
+
+function episodeRenderer() {
+  const cards = [], buttons = new Map();
+  let preferred, played, fits = 0;
+  const list = {
+    innerHTML: "", appendChild: card => cards.push(card),
+    querySelector: () => cards[0], querySelectorAll: () => cards,
+  };
+  const ctx = load(["escapeHtml", "renderEpisodes"], {
+    detailState: { item: { url: "/show" }, historyHit: { lastEpisode: { play_url: "/play/3" } } },
+    screens: { detail: {} },
+    document: {
+      createElement: () => ({ dataset: {}, handlers: {}, addEventListener: function (event, fn) { this.handlers[event] = fn; } }),
+      getElementById: id => {
+        if (id === "episode-list") return list;
+        if (!buttons.has(id)) buttons.set(id, { dataset: {} });
+        return buttons.get(id);
+      },
+      querySelector: () => ({ dataset: {} }),
+    },
+    fitEpisodeNames: () => fits++,
+    rebuildFocus: (screen, card) => { preferred = card; },
+    playEpisode: ep => { played = ep; },
+  });
+  return { ctx, cards, preferred: () => preferred, played: () => played, fits: () => fits };
+}
+
+test("최신 4화가 맨 앞이어도 순번을 붙이지 않고 서버 이름과 순서만 표시한다", () => {
+  const view = episodeRenderer();
+  view.ctx.renderEpisodes([
+    { name: "4", episode: 1, play_url: "/play/4" },
+    { name: "3", episode: 2, play_url: "/play/3" },
+    { name: "2", episode: 3, play_url: "/play/2" },
+  ]);
+  assert.deepEqual(view.cards.map(card => card.innerHTML), [
+    '<div class="ep-name">4</div>', '<div class="ep-name">3</div>', '<div class="ep-name">2</div>',
+  ]);
+  assert.deepEqual(view.cards.map(card => card._epPlayUrl), ["/play/4", "/play/3", "/play/2"]);
+  assert.equal(view.preferred()._epPlayUrl, "/play/3");
+  assert.equal(view.fits(), 1);
+  view.cards[0].handlers.click();
+  assert.equal(view.played().play_url, "/play/4");
+});
+
+test("날짜·원본 회차 이름은 그대로 표시하고 임의 회차나 HTML을 추가하지 않는다", () => {
+  const view = episodeRenderer();
+  view.ctx.renderEpisodes([
+    { name: "26/10/20", episode: 1, play_url: "/date" },
+    { name: "제4화", episode: 2, play_url: "/four" },
+    { name: "<원본 이름>", episode: 3, play_url: "/text" },
+  ]);
+  assert.equal(view.cards[0].innerHTML, '<div class="ep-name">26/10/20</div>');
+  assert.equal(view.cards[1].innerHTML, '<div class="ep-name">제4화</div>');
+  assert.equal(view.cards[2].innerHTML, '<div class="ep-name">&lt;원본 이름&gt;</div>');
+  assert.ok(view.cards.every(card => !card.innerHTML.includes("ep-num")));
+});
+
+test("회차 번호 표시를 없애도 기존 재생 진행률은 보존한다", () => {
+  const view = episodeRenderer();
+  view.ctx.STORE.set("history", [{ detail_url: "/show", episodes: { "/play/4": { position: 50, duration: 100 } } }]);
+  view.ctx.renderEpisodes([{ name: "4", episode: 1, play_url: "/play/4" }]);
+  assert.match(view.cards[0].innerHTML, /width:50%/);
+  assert.ok(!view.cards[0].innerHTML.includes("1화"));
+});
+
+test("숫자 단축키는 추정 번호가 아니라 원본에 적힌 회차를 선택한다", () => {
+  let played;
+  const ctx = load(["handleNumberKey"], {
+    currentScreen: "detail",
+    detailState: { info: { episodes: [
+      { name: "4", episode: 1, play_url: "/play/4" },
+      { name: "제1회", episode: 2, play_url: "/play/1" },
+      { name: "10화", episode: 3, play_url: "/play/10" },
+    ] } },
+    playEpisode: ep => { played = ep; },
+  });
+  assert.equal(ctx.handleNumberKey(1), true);
+  assert.equal(played.play_url, "/play/1");
+  assert.equal(ctx.handleNumberKey(4), true);
+  assert.equal(played.play_url, "/play/4");
+  assert.equal(ctx.handleNumberKey(0), true);
+  assert.equal(played.play_url, "/play/10");
+  assert.equal(ctx.handleNumberKey(2), false);
+});
+
+test("날짜나 일반 이름뿐인 항목은 추정 회차 단축키로 재생하지 않는다", () => {
+  let plays = 0;
+  const ctx = load(["handleNumberKey"], {
+    currentScreen: "detail",
+    detailState: { info: { episodes: [
+      { name: "26/10/20", episode: 1 }, { name: "바로보기", episode: 2 },
+    ] } },
+    playEpisode: () => plays++,
+  });
+  assert.equal(ctx.handleNumberKey(1), false);
+  assert.equal(ctx.handleNumberKey(2), false);
+  assert.equal(plays, 0);
+});

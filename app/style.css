@@ -157,7 +157,6 @@ html, body {
   display: flex; flex-direction: column; gap: 6px; min-width: 0;
 }
 .ep-card.focused { border-color: var(--focus); }
-.ep-card .ep-num { font-size: 16px; color: var(--muted); }
 .ep-card .ep-name { white-space: normal; overflow-wrap: break-word; word-break: break-word; }
 .ep-card .ep-progress {
   height: 7px; background: var(--panel-2); border-radius: 3px; overflow: hidden;

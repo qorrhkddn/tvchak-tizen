@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "1.0.37";
+  var APP_VERSION = "1.0.38";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -1435,7 +1435,6 @@
       var pct = 0;
       if (watched && watched.duration) pct = Math.min(100, Math.round(watched.position / watched.duration * 100));
       card.innerHTML =
-        '<div class="ep-num">' + ep.episode + '화</div>' +
         '<div class="ep-name">' + escapeHtml(ep.name || "") + '</div>' +
         (pct > 0 ? '<div class="ep-progress"><div class="ep-progress-bar" style="width:' + pct + '%"></div></div>' : '');
       card._epPlayUrl = ep.play_url;
@@ -2317,11 +2316,13 @@
     }
     if (currentScreen === "detail" && detailState && detailState.info) {
       var episodes = detailState.info.episodes || [];
-      // 1~9 → 1~9화, 0 → 10화. 회차 번호로 매칭.
+      // 원본 이름에 명시된 회차만 선택한다. 서버의 추정 번호는 사용하지 않는다.
       var targetEp = num === 0 ? 10 : num;
       var match = null;
       for (var i = 0; i < episodes.length; i++) {
-        if (episodes[i].episode === targetEp) { match = episodes[i]; break; }
+        var name = (episodes[i].name || "").trim();
+        var number = name.match(/(\d+)\s*[화회부]/) || name.match(/^(\d+)$/);
+        if (number && Number(number[1]) === targetEp) { match = episodes[i]; break; }
       }
       if (match) {
         playEpisode(match);

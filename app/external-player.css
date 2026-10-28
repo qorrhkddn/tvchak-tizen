@@ -1,0 +1,132 @@
+/* iOS 상세 화면에만 init()이 삽입하는 작은 보조 도구. */
+.external-player-toolbar {
+  display: flex;
+  gap: 6px;
+  margin: 0 0 12px;
+}
+.external-player-toolbar-button {
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid var(--border, #2d333d);
+  border-radius: 6px;
+  background: var(--panel-2, #1f242f);
+  color: var(--text, #f0f2f7);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+.external-player-toolbar-button:focus-visible,
+.external-player-panel button:focus-visible,
+.external-player-panel a:focus-visible {
+  outline: 2px solid var(--focus, #ffcc44);
+  outline-offset: 2px;
+}
+.external-player-dialog,
+.external-player-fallback {
+  z-index: 200;
+  color: var(--text, #f0f2f7);
+  background: var(--panel, #161a22);
+  border: 1px solid var(--border, #2d333d);
+  border-radius: 12px;
+  padding: 0;
+  width: calc(100vw - 24px);
+  max-width: 440px;
+  max-height: calc(100vh - 24px);
+  font-size: 15px;
+  line-height: 1.45;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, .6);
+}
+.external-player-dialog::backdrop { background: rgba(0, 0, 0, .72); }
+.external-player-fallback {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  max-width: none;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  background: rgba(0, 0, 0, .72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.external-player-fallback[hidden],
+.external-player-panel [hidden] { display: none !important; }
+.external-player-panel {
+  padding: 16px;
+  padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+}
+.external-player-fallback .external-player-panel {
+  width: calc(100vw - 24px);
+  max-width: 440px;
+  border: 1px solid var(--border, #2d333d);
+  border-radius: 12px;
+  background: var(--panel, #161a22);
+}
+.external-player-heading { font-size: 17px; margin: 0 0 12px; }
+.external-player-episodes {
+  max-height: 42vh;
+  overflow-y: auto;
+  display: grid;
+  gap: 6px;
+}
+.external-player-episode {
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+  border: 1px solid var(--border, #2d333d);
+  border-radius: 6px;
+  padding: 9px 10px;
+  background: var(--panel-2, #1f242f);
+  color: var(--text, #f0f2f7);
+  font: inherit;
+  font-size: 15px;
+  cursor: pointer;
+}
+.external-player-episode[aria-pressed="true"] { border-color: var(--accent, #4f8cff); }
+.external-episode-name { display: block; width: 100%; white-space: nowrap; }
+.external-player-status { min-height: 1.5em; margin: 12px 0; color: var(--muted, #8e96a4); }
+.external-player-status[data-state="error"] { color: var(--danger, #e74c3c); }
+.external-player-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.external-player-action,
+.external-player-cancel {
+  display: inline-block;
+  border: 1px solid var(--border, #2d333d);
+  border-radius: 6px;
+  padding: 9px 12px;
+  background: var(--accent, #4f8cff);
+  color: #fff;
+  font: inherit;
+  font-size: 15px;
+  text-decoration: none;
+  cursor: pointer;
+}
+.external-player-cancel { background: var(--panel-2, #1f242f); color: var(--text, #f0f2f7); }
+.external-player-manual {
+  width: 100%;
+  min-height: 72px;
+  margin-top: 10px;
+  border: 1px solid var(--border, #2d333d);
+  border-radius: 6px;
+  padding: 8px;
+  background: var(--bg, #0a0c10);
+  color: var(--text, #f0f2f7);
+  font: inherit;
+  font-size: 14px;
+  -webkit-user-select: text !important;
+  user-select: text !important;
+}
+.external-player-note { margin: 12px 0; font-size: 13px; color: var(--muted, #8e96a4); }
+@media (max-width: 600px) {
+  .external-player-dialog { margin: auto auto 0; border-radius: 12px 12px 0 0; width: 100%; max-width: none; }
+  .external-player-fallback { align-items: flex-end; }
+  .external-player-fallback .external-player-panel { width: 100%; max-width: none; border-radius: 12px 12px 0 0; }
+}

@@ -109,7 +109,7 @@ test("정렬한 뒤 최신 60개를 표시한다", () => {
 });
 
 function playback(overrides = {}) {
-  return load(["persistHistory", "toggleHistory", "playEpisode"], {
+  return load(["persistHistory", "toggleHistory", "rememberEpisode", "playEpisode"], {
     detailState: { item: { url: "/a", title: "작품" }, info: null },
     player: { currentEp: { play_url: "/ep", name: "회차", episode: 1 }, video: { currentTime: 30, duration: 100 } },
     updateHistoryButton: () => {},
@@ -288,4 +288,98 @@ test("날짜나 일반 이름뿐인 항목은 추정 회차 단축키로 재생�
   assert.equal(ctx.handleNumberKey(1), false);
   assert.equal(ctx.handleNumberKey(2), false);
   assert.equal(plays, 0);
+});
+
+function externalPlayback(overrides = {}) {
+  const flushes = [], cleared = [];
+  const ctx = load(["rememberEpisode", "findHistory", "getExternalEpisodes", "prepareExternalPlayback", "recordExternalPlayback"], {
+    URL, currentScreen: "detail",
+    detailState: { item: { url: "/show", title: "작품" }, info: { episodes: [
+      { name: "4", episode: 1, play_url: "/play/4" },
+    ] } },
+    nasUrl: () => "http://nas.test:7777", _pushTimers: { history: 123 },
+    clearTimeout: timer => cleared.push(timer),
+    _pushHistory: keepalive => flushes.push(keepalive),
+    updateHistoryButton: () => {}, updateResumeInfo: () => {},
+    apiGet: async () => ({ proxy_url: "http://nas.test:7777/proxy?u=https%3A%2F%2Fmedia.test%2Fvideo.mp4" }),
+    ...overrides,
+  });
+  ctx.STORE.set("history", []);
+  return { ctx, flushes, cleared };
+}
+
+test("외부 재생 준비는 원본 회차와 NAS 프록시를 사용하고 시청 기록을 바꾸지 않는다", async () => {
+  let options;
+  const { ctx, flushes } = externalPlayback({ apiGet: async (url, opts) => {
+    options = { url, opts };
+    return { proxy_url: "http://nas.test:7777/proxy?u=video" };
+  } });
+  const details = ctx.getExternalEpisodes();
+  details.episodes.pop();
+  assert.equal(ctx.detailState.info.episodes.length, 1);
+  const ready = await ctx.prepareExternalPlayback("/play/4");
+  assert.equal(ready.url, "http://nas.test:7777/proxy?u=video");
+  assert.equal(ready.episode.name, "4");
+  assert.equal(ready.detailUrl, "/show");
+  assert.equal(options.opts.bypass, true);
+  assert.match(options.url, /%2Fplay%2F4/);
+  assert.equal(ctx.STORE.get("history").length, 0);
+  assert.deepEqual(flushes, []);
+  assert.equal(ctx.currentScreen, "detail");
+});
+
+test("외부 재생은 현재 목록에 없는 회차와 NAS 이외의 주소를 거부한다", async () => {
+  const { ctx } = externalPlayback();
+  await assert.rejects(ctx.prepareExternalPlayback("/not-in-list"), /회차를 선택/);
+  for (const proxy_url of ["https://evil.test/proxy?u=video", "http://nas.test:7777/not-proxy", "http://user:password@nas.test:7777/proxy"]) {
+    ctx.apiGet = async () => ({ proxy_url });
+    await assert.rejects(ctx.prepareExternalPlayback("/play/4"), /NAS 프록시/);
+  }
+});
+
+test("외부 주소를 준비하는 동안 상세가 바뀌면 이전 응답을 사용하지 않는다", async () => {
+  let resolve;
+  const { ctx } = externalPlayback({ apiGet: () => new Promise(done => { resolve = done; }) });
+  const pending = ctx.prepareExternalPlayback("/play/4");
+  ctx.detailState = { item: { url: "/other" }, info: { episodes: [] } };
+  resolve({ proxy_url: "http://nas.test:7777/proxy?u=video" });
+  await assert.rejects(pending, /상세 화면이 변경/);
+  assert.equal(ctx.STORE.get("history").length, 0);
+});
+
+test("외부 앱 열기 시도만 즉시 전송하고 기존 재생 위치와 등록 시각은 유지한다", () => {
+  const { ctx, flushes, cleared } = externalPlayback();
+  ctx.STORE.set("history", [{ detail_url: "/show", addedAt: 50, updatedAt: 100,
+    episodes: { "/play/4": { name: "4", position: 70, duration: 100 } },
+  }]);
+  assert.equal(ctx.recordExternalPlayback("/play/4", "/wrong"), false);
+  assert.deepEqual(flushes, []);
+  assert.equal(ctx.recordExternalPlayback("/play/4", "/show"), true);
+  const saved = ctx.STORE.get("history")[0];
+  assert.equal(saved.addedAt, 50);
+  assert.equal(saved.updatedAt, 1000);
+  assert.equal(saved.lastEpisode.name, "4");
+  assert.equal(saved.lastEpisode.position, 70);
+  assert.equal(saved.episodes["/play/4"].duration, 100);
+  assert.deepEqual(flushes, [true]);
+  assert.deepEqual(cleared, [123]);
+  ctx.currentScreen = "home";
+  assert.equal(ctx.getExternalEpisodes(), null);
+  assert.equal(ctx.recordExternalPlayback("/play/4", "/show"), false);
+});
+
+test("외부 앱 전환 시 작은 기록만 keepalive로 전송한다", () => {
+  const requests = [];
+  const ctx = load(["_pushHistory"], {
+    profileCache: { id: "default", history: [{ title: "작품" }] },
+    nasUrl: () => "http://nas.test:7777", fetch: async (url, opts) => { requests.push(opts); },
+  });
+  ctx._pushHistory(true);
+  assert.equal(requests[0].keepalive, true);
+  ctx.profileCache.history = [{ title: "가".repeat(17000) }];
+  ctx._pushHistory(true);
+  assert.equal(requests[1].keepalive, undefined);
+  ctx.profileCache.history = [];
+  ctx._pushHistory();
+  assert.equal(requests[2].keepalive, undefined);
 });

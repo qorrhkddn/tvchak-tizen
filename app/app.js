@@ -8,7 +8,7 @@
   "use strict";
 
   // NAS에서 제공되는 웹 UI 버전. TV 실행기의 package.json 버전과 독립적.
-  var APP_VERSION = "1.1.0";
+  var APP_VERSION = "1.1.1";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -507,15 +507,16 @@
     if (_pushTimers[key]) clearTimeout(_pushTimers[key]);
     _pushTimers[key] = setTimeout(fn, 300);
   }
-  function _pushHistory() {
+  function _pushHistory(keepalive) {
     if (!profileCache.id) return;
     var base = (nasUrl() || "").replace(/\/$/, "");
     if (!base) return;
-    fetch(base + "/api/profiles/" + encodeURIComponent(profileCache.id) + "/history", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(profileCache.history),
-    }).catch(function (e) { console.warn("history push 실패", e); });
+    var body = JSON.stringify(profileCache.history);
+    var options = { method: "PUT", headers: { "Content-Type": "application/json" }, body: body };
+    // keepalive의 64KiB 제한보다 작은 UTF-8 본문에만 적용한다.
+    if (keepalive && body.length <= 16000) options.keepalive = true;
+    fetch(base + "/api/profiles/" + encodeURIComponent(profileCache.id) + "/history", options)
+      .catch(function (e) { console.warn("history push 실패", e); });
   }
   function _pushFavorites() {
     if (!profileCache.id) return;
@@ -1404,7 +1405,7 @@
   }
 
   function fitEpisodeNames() {
-    var names = document.querySelectorAll("#episode-list .ep-name");
+    var names = document.querySelectorAll("#episode-list .ep-name, .external-episode-name");
     names.forEach(function (name) {
       name.style.fontSize = "";
       name.style.whiteSpace = "nowrap";
@@ -1573,6 +1574,77 @@
     showOverlayBriefly();
   }
 
+  function rememberEpisode(ep) {
+    if (!detailState || !detailState.item) return false;
+    try {
+      var history = STORE.get(KEYS.HISTORY, []);
+      var idx = history.findIndex(function (h) { return h.detail_url === detailState.item.url; });
+      var info = detailState.info, it = detailState.item;
+      var entry = idx >= 0 ? history[idx] : {
+        detail_url: it.url,
+        title: (info && info.title) || it.title,
+        poster: (info && info.poster) || it.poster,
+        poster_proxy_path: stripNasPrefix(it.poster_proxy_url || (info && info.poster_proxy_url)),
+        episodes: {},
+        addedAt: Date.now(),
+      };
+      entry.episodes = entry.episodes || {};
+      if (!entry.episodes[ep.play_url]) {
+        entry.episodes[ep.play_url] = {
+          position: 0, duration: 0, name: ep.name || "", episode: ep.episode || 0,
+        };
+      }
+      entry.lastEpisode = {
+        play_url: ep.play_url, name: ep.name || "",
+        position: entry.episodes[ep.play_url].position || 0,
+      };
+      entry.updatedAt = Date.now();
+      if (idx >= 0) history[idx] = entry; else history.push(entry);
+      history.sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); });
+      if (history.length > 50) history.length = 50;
+      STORE.set(KEYS.HISTORY, history);
+      return true;
+    } catch (_) { return false; }
+  }
+
+  function getExternalEpisodes() {
+    if (currentScreen !== "detail" || !detailState || !detailState.info) return null;
+    return { detailUrl: detailState.item.url, title: detailState.info.title || detailState.item.title || "",
+             episodes: (detailState.info.episodes || []).slice() };
+  }
+
+  function prepareExternalPlayback(playUrl) {
+    var details = getExternalEpisodes();
+    var ep = details && details.episodes.find(function (item) { return item.play_url === playUrl; });
+    if (!ep) return Promise.reject(new Error("현재 상세 화면의 회차를 선택하세요."));
+    var state = detailState;
+    return apiGet("/api/extract?u=" + encodeURIComponent(playUrl), { bypass: true }).then(function (result) {
+      if (state !== detailState || currentScreen !== "detail") throw new Error("상세 화면이 변경되었습니다.");
+      if (result.error) throw new Error(result.error);
+      var nas = new URL(nasUrl());
+      var url = new URL(result.proxy_url || result.proxy_path || "", nas.href);
+      if ((url.protocol !== "http:" && url.protocol !== "https:") || url.origin !== nas.origin
+          || url.pathname !== "/proxy" || url.username || url.password) {
+        throw new Error("NAS 프록시 재생 주소가 없습니다.");
+      }
+      return { url: url.href, detailUrl: details.detailUrl, episode: ep };
+    });
+  }
+
+  function recordExternalPlayback(playUrl, detailUrl) {
+    var details = getExternalEpisodes();
+    if (!details || details.detailUrl !== detailUrl) return false;
+    var ep = details.episodes.find(function (item) { return item.play_url === playUrl; });
+    if (!ep || !rememberEpisode(ep)) return false;
+    // 앱 전환 전에 기록을 전송한다. 외부 앱의 실제 재생 위치를 추정하지 않는다.
+    if (_pushTimers.history) clearTimeout(_pushTimers.history);
+    _pushHistory(true);
+    detailState.historyHit = findHistory(detailUrl);
+    updateHistoryButton();
+    updateResumeInfo();
+    return true;
+  }
+
   function playEpisode(ep, bypass) {
     // show("player") 호출 시 _currentHashFor("player") 가 player.currentEp 의
     // play_url 을 hash 에 박는다. show 전에 currentEp 를 미리 set 해야 deep
@@ -1585,46 +1657,8 @@
     player.overlay.classList.remove("hidden");
     applyFitMode();
 
-    // 사용자가 episode를 클릭한 시점에 이미 history에 placeholder를 박아둔다.
-    // 그래야 재생이 1초 미만에 실패하거나(BunnyCDN 404 등) mobile의 외부 iframe
-    // fallback으로 빠져서 base video가 안 움직이는 경우에도 detail 화면에
-    // 진행률·"이어보기에서 제거" 버튼이 정상 표시된다. 정상 재생 중에는
-    // persistHistory가 5초마다 같은 entry의 position/duration을 덮어쓴다.
-    try {
-      if (detailState && detailState.item) {
-        var history = STORE.get(KEYS.HISTORY, []);
-        var idx = history.findIndex(function (h) {
-          return h.detail_url === detailState.item.url;
-        });
-        var info = detailState.info, it = detailState.item;
-        var entry = idx >= 0 ? history[idx] : {
-          detail_url: it.url,
-          title: (info && info.title) || it.title,
-          poster: (info && info.poster) || it.poster,
-          poster_proxy_path: stripNasPrefix(it.poster_proxy_url || (info && info.poster_proxy_url)),
-          episodes: {},
-          addedAt: Date.now(),
-        };
-        entry.episodes = entry.episodes || {};
-        // 같은 회차가 이미 있으면 position 유지(재시청 흐름), 없으면 0부터
-        if (!entry.episodes[ep.play_url]) {
-          entry.episodes[ep.play_url] = {
-            position: 0, duration: 0,
-            name: ep.name || "", episode: ep.episode || 0,
-          };
-        }
-        entry.lastEpisode = {
-          play_url: ep.play_url,
-          name: ep.name || "",
-          position: entry.episodes[ep.play_url].position || 0,
-        };
-        entry.updatedAt = Date.now();
-        if (idx >= 0) history[idx] = entry; else history.push(entry);
-        history.sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); });
-        if (history.length > 50) history.length = 50;
-        STORE.set(KEYS.HISTORY, history);
-      }
-    } catch (_) {}
+    // 실패·외부 iframe 전환 전에도 회차를 남기고, 정상 재생 중에는 위치를 갱신한다.
+    rememberEpisode(ep);
 
     apiGet("/api/extract?u=" + encodeURIComponent(ep.play_url), { bypass: bypass }).then(function (j) {
       if (j.error) throw new Error(j.error);
@@ -2604,6 +2638,10 @@
     loadCategoryMore: function () { try { loadCategoryMore(); } catch (_) {} },
     goBack: function () { try { goBack(); } catch (_) {} },
     triggerColor: function (c) { try { onColor(c); } catch (_) {} },
+    getExternalEpisodes: getExternalEpisodes,
+    prepareExternalPlayback: prepareExternalPlayback,
+    recordExternalPlayback: recordExternalPlayback,
+    fitEpisodeNames: fitEpisodeNames,
     getListState: function () {
       return {
         mode: listState.mode,

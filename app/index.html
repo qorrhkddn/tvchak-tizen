@@ -27,7 +27,8 @@
         <button class="btn btn-secondary focusable" data-action="refresh-cookie" title="Cloudflare 챌린지 막힐 때: NAS 안에서 자동으로 cf_clearance 발급 (5~15초)">🍪 cf_clearance 갱신</button>
         <button class="btn btn-secondary focusable" data-action="clear-image-cache">이미지 캐시 비우기</button>
         <button class="btn btn-secondary focusable" data-action="clear-api-cache">API 응답 캐시 비우기</button>
-        <button class="btn btn-secondary focusable" data-action="check-update">업데이트 확인</button>
+        <button class="btn btn-secondary focusable" data-action="reload-web">웹 화면 다시 불러오기</button>
+        <button class="btn btn-secondary focusable" data-action="check-update">NAS 웹 업데이트 확인</button>
         <button class="btn btn-secondary focusable" data-action="diag-tizen">Tizen API 진단</button>
       </div>
       <div id="update-status" class="muted" style="margin-top: 6px;"></div>
@@ -223,6 +224,7 @@
     </div>
   </div>
 
+  <script src="host-bridge.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

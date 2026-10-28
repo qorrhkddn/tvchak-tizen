@@ -1,10 +1,10 @@
 {
   "name": "tvchak-tizen",
-  "version": "1.0.39",
-  "description": "TVChak client for Samsung Tizen TV via TizenBrew. Backend (NAS proxy) handles search, extraction and Referer injection.",
+  "version": "1.1.0",
+  "description": "TVChak NAS 웹 실행기. 화면은 NAS에서 제공하며 TizenBrew는 리모컨과 실행 환경만 유지합니다.",
   "packageType": "app",
   "appName": "TVChak",
-  "appPath": "app/index.html",
+  "appPath": "launcher/index.html",
   "keys": [
     "ColorF0Red",
     "ColorF1Green",
@@ -18,9 +18,10 @@
     "MediaRewind",
     "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"
   ],
-  "main": "app/app.js",
+  "main": "launcher/launcher.js",
   "license": "MIT",
   "files": [
+    "launcher/",
     "app/"
   ]
 }

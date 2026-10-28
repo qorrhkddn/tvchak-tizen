@@ -1,0 +1,18 @@
+* { box-sizing: border-box; }
+html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #0a0c10; color: #f0f2f7; }
+body { font: 24px/1.5 "Tizen Sans", "Apple SD Gothic Neo", sans-serif; }
+#web-client { position: fixed; top: 0; right: 0; bottom: 0; left: 0; width: 100%; height: 100%; border: 0; visibility: hidden; background: #0a0c10; }
+#web-client.ready { visibility: visible; }
+#connection-screen { position: fixed; top: 0; right: 0; bottom: 0; left: 0; display: flex; align-items: center; justify-content: center; padding: 32px; background: #0a0c10; }
+#connection-screen.hidden { display: none; }
+#connection-form { width: 720px; max-width: 100%; padding: 32px; background: #161a22; border-radius: 16px; }
+h1 { color: #4f8cff; margin: 0 0 12px; }
+p { margin: 12px 0; }
+label { display: block; margin-top: 24px; }
+input { width: 100%; font: inherit; padding: 14px; margin: 8px 0 16px; color: #f0f2f7; background: #0a0c10; border: 2px solid #2d333d; border-radius: 8px; }
+.actions { display: flex; flex-wrap: wrap; gap: 12px; }
+button { font: inherit; padding: 12px 22px; border: 2px solid transparent; border-radius: 8px; background: #4f8cff; color: #fff; cursor: pointer; }
+#change-address { background: #2d333d; }
+input:focus, button:focus { outline: 3px solid #ffcc44; outline-offset: 3px; }
+.hint { font-size: 18px; color: #8e96a4; }
+#connection-status[data-error="true"] { color: #ff8a80; }

@@ -7,9 +7,8 @@
 (function () {
   "use strict";
 
-  // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
-  // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "1.0.39";
+  // NAS에서 제공되는 웹 UI 버전. TV 실행기의 package.json 버전과 독립적.
+  var APP_VERSION = "1.1.0";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -194,11 +193,11 @@
       if (k === "tvchak.favorites") return profileCache.favorites;
       try {
         var v = localStorage.getItem(k);
-        if (v == null) return def;
+        if (v == null) return window.TVChakHost ? window.TVChakHost.getSetting(k, def) : def;
         return JSON.parse(v);
       } catch (e) {
         try { localStorage.removeItem(k); } catch (_) {}
-        return def;
+        return window.TVChakHost ? window.TVChakHost.getSetting(k, def) : def;
       }
     },
     set: function (k, v) {
@@ -212,12 +211,10 @@
         _debouncedPush("favorites", _pushFavorites);
         return true;
       }
-      try {
-        localStorage.setItem(k, JSON.stringify(v));
-        return true;
-      } catch (e) {
-        return false;
-      }
+      var saved = false;
+      try { localStorage.setItem(k, JSON.stringify(v)); saved = true; } catch (_) {}
+      if (window.TVChakHost && window.TVChakHost.setSetting(k, v)) saved = true;
+      return saved;
     },
   };
 
@@ -290,13 +287,10 @@
   var profileCache = { id: null, history: [], favorites: [], ready: false };
 
   function _currentProfileId() {
-    try {
-      var v = localStorage.getItem(KEYS.PROFILE_ID);
-      return v ? JSON.parse(v) : "default";
-    } catch (_) { return "default"; }
+    return STORE.get(KEYS.PROFILE_ID, "default");
   }
   function _setCurrentProfileId(id) {
-    try { localStorage.setItem(KEYS.PROFILE_ID, JSON.stringify(id)); } catch (_) {}
+    STORE.set(KEYS.PROFILE_ID, id);
   }
 
   function ensureHistoryAddedAt(items) {
@@ -451,7 +445,9 @@
           statusEl.textContent = "실패: " + j.error;
           return;
         }
-        if (j.update_available) {
+        if (j.managed_locally) {
+          statusEl.textContent = "NAS에서 직접 관리 중 — ./deploy --web 실행 후 다시 열면 적용됩니다.";
+        } else if (j.update_available) {
           statusEl.innerHTML =
             '<strong style="color: var(--accent);">새 버전 있음</strong> · 현재 ' +
             escapeHtml(j.current_short || "없음") + " → 최신 " + escapeHtml(j.latest_short) +
@@ -540,7 +536,10 @@
     none: "원본 비율 (작게)"
   };
 
-  function nasUrl() { return STORE.get(KEYS.NAS, ""); }
+  function nasUrl() {
+    if (window.TVCHAK_WEB && window.TVCHAK_WEB.hosted) return location.origin;
+    return STORE.get(KEYS.NAS, "");
+  }
 
   // ---------- 토스트 ----------
   var toastEl = document.getElementById("toast");
@@ -862,6 +861,14 @@
     var v = inputValue("nas-input").trim();
     if (!v) { toast("주소를 입력하세요", "danger"); return; }
     if (!/^https?:\/\//.test(v)) v = "http://" + v;
+    if (window.TVCHAK_WEB && window.TVCHAK_WEB.hosted) {
+      try {
+        v = window.TVChakBridge.normalizeNas(v);
+        if (window.TVChakHost && window.TVChakHost.changeNas(v)) return;
+        location.assign(v + "/web/" + (window.TVCHAK_WEB.mode === "tv" ? "?tv=1" : ""));
+      } catch (e) { toast(e.message, "danger"); }
+      return;
+    }
     STORE.set(KEYS.NAS, v);
     document.getElementById("settings-status").textContent = "확인 중...";
     apiGet("/healthz").then(function (j) {
@@ -2010,7 +2017,7 @@
       apiGet("/healthz").then(function (j) {
         if (j && j.server_version) {
           var verEl = document.getElementById("app-version");
-          if (verEl) verEl.textContent = "TV v" + APP_VERSION + " · srv v" + j.server_version;
+          if (verEl) verEl.textContent = "웹 v" + APP_VERSION + " · srv v" + j.server_version;
         }
       }).catch(function () {});
       // 프로필 전환 직후면 이어보기 탭으로 자동 이동.
@@ -2092,6 +2099,7 @@
     if (action === "swap-src") return swapPlayerSrc();
     if (action === "pip") return togglePictureInPicture();
     if (action === "add-profile") return addProfileApi();
+    if (action === "reload-web") return location.reload();
     if (action === "check-update") return checkUpdate();
     if (action === "do-update") return doUpdate();
     if (action === "search-go") return doSearch();
@@ -2533,7 +2541,7 @@
 
   // 첫 진입을 history 에 등록 + 브라우저 back/forward 리스너.
   try {
-    history.replaceState({ screen: "home", ts: Date.now() }, "", location.pathname + (location.hash || "#home"));
+    history.replaceState({ screen: "home", ts: Date.now() }, "", location.pathname + location.search + (location.hash || "#home"));
   } catch (_) {}
   window.addEventListener("popstate", function (e) {
     if (_suppressHistory) return;
@@ -2563,19 +2571,30 @@
     }
   });
 
-  registerKeys();
-  if (nasUrl()) {
-    loadProfile().then(function () {
-      // URL hash 로 deep link 가 들어왔으면 그쪽으로, 아니면 home.
-      enterHome();
-      var parsed = _parseHash();
-      if (parsed && parsed.screen !== "home") {
-        _applyHashRoute(parsed);
-      }
-    });
-  } else {
-    show("settings", false);
+  function getHostState() {
+    var current = focus.current && focus.items.find(function (item) { return item.el === focus.current; });
+    return {
+      screen: currentScreen || "loading",
+      canHandleBack: currentScreen !== "home" || !!cacheMenuId || !!(current && current.row > 0),
+    };
   }
+
+  function startApplication() {
+    registerKeys();
+    if (nasUrl()) {
+      loadProfile().then(function () {
+        // TV 실행기의 설정 이전을 끝낸 뒤 프로필과 deep link를 적용한다.
+        enterHome();
+        var parsed = _parseHash();
+        if (parsed && parsed.screen !== "home") _applyHashRoute(parsed);
+      });
+    } else {
+      show("settings", false);
+    }
+  }
+
+  if (window.TVChakHost) window.TVChakHost.start(getHostState).then(startApplication);
+  else startApplication();
 
   // 외부 보조 UI(예: tvchak-proxy의 /web/ 모바일 overlay)에서 호출하기 위한
   // 좁은 entry point. closure 안에 있는 핵심 동작들을 위임 호출만 노출한다.

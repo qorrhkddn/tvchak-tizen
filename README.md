@@ -1,91 +1,100 @@
-# TVChak Tizen (TizenBrew module)
+# TVChak — NAS 웹 + TV 실행기
 
-Samsung Tizen TV용 TVChak 클라이언트 — TizenBrew의 application 모듈로 동작한다.
+실제 화면은 **NAS 한 곳에서 제공**합니다. TizenBrew에는 NAS 웹을 여는 작은 실행기만 설치하고, iOS·태블릿·PC도 같은 웹을 사용합니다.
 
-검색·상세 페이지 파싱·스트림 추출·Referer 헤더 주입 등 까다로운 부분은
-모두 NAS의 **백엔드 프록시 서버**가 처리하고, TV 앱은 그 JSON API만 호출한다.
+```text
+TizenBrew 실행기 ── iframe /web/?tv=1 ──┐
+                                      ├─ NAS /web/base/의 공용 UI
+Safari·iOS 홈 화면 ──── /web/ ─────────┘
+```
 
 ## 구성
 
-```
-package.json    TizenBrew 모듈 매니페스트
+```text
+package.json           TizenBrew 실행기 매니페스트
+launcher/
+  index.html           NAS 주소·연결 오류·재시도 화면
+  launcher.js          NAS 웹 로딩, Tizen 키 등록·전달
+  launcher.css         실행기 화면 스타일
 app/
-  index.html    SPA 진입
-  style.css     TV 1920×1080 다크 테마
-  app.js        설정/홈/상세/플레이어 + 리모컨 + localStorage
+  index.html           NAS에서 제공하는 실제 UI
+  app.js               목록·상세·재생·프로필·리모컨 조작
+  host-bridge.js       실행기와 NAS 사이의 키·설정 전달
+  style.css            TV 레이아웃
 ```
 
-화면:
-- **설정** — 첫 진입 시 NAS 주소(`http://<NAS_IP>:7777`) 입력 (가상 키보드)
-- **홈** — 탭: 영화 / 드라마 / 예능 / 애니 / 검색 / 이어보기 / 즐겨찾기
-- **상세** — 에피소드 카드 그리드, 회차별 시청 진행도 표시, 즐겨찾기 토글
-- **플레이어** — 풀스크린 `<video>`, ◀▶ 10초 시킹, 위치 자동 저장(5초마다)
+`app/`은 NAS의 `/data/web-base`에 배포합니다. 실행기 진입점은 `launcher/index.html`이므로 기존 GitHub 동기화가 `app/`을 받아도 실행기가 중첩되지 않습니다.
 
-## 백엔드(NAS) 셋업
+NAS는 기본 `/web/`에 모바일·PC 스타일과 iOS 홈 화면용 manifest·아이콘을 더하고, `/web/?tv=1`에서는 TV 레이아웃을 그대로 제공합니다.
 
-백엔드(시놀로지 등 Docker)는 별도 비공개 리포지토리에서 관리한다.
-TV 모듈만 단독 사용은 불가능 — 동일 LAN에 백엔드가 떠 있어야 한다.
+## 최초 전환 — 한 번만
 
-백엔드가 제공해야 하는 엔드포인트:
+1. 같은 LAN의 NAS에 tvchak-py **v2.8.0 이상**을 배포합니다.
+2. 실제 웹 UI인 이 저장소의 `app/`을 NAS에 배포합니다.
+3. TizenBrew 모듈을 **v1.1.0 이상**으로 한 번 업데이트합니다.
+4. 실행기에서 NAS 주소를 확인합니다. 기존 TV의 NAS 주소 설정은 그대로 사용합니다.
 
-| 경로 | 용도 |
-|---|---|
-| `GET /api/categories` | 카테고리 목록 |
-| `GET /api/mainpage?cat=&page=` | 카테고리별 카드 목록 |
-| `GET /api/search?q=` | 검색 결과 |
-| `GET /api/detail?u=` | 에피소드 목록 |
-| `GET /api/extract?u=` | 스트림 URL + `proxy_url` 반환 |
-| `GET /api/domain` / `POST /api/domain/refresh` | 시드 도메인 조회/갱신 |
-| `GET /proxy?u=&ref=` | Referer 주입 미디어 중계 |
-| `GET /healthz` | 헬스체크 |
+맥의 백엔드 저장소에서:
 
-응답에는 가능하면 `*_proxy_url` 필드를 같이 포함해서 TV 측이 Referer/CORS를
-신경 쓸 일이 없게 한다.
-
-## TV에 설치
-
-### 사전 조건
-- Samsung Tizen TV (2017년 이후, Tizen 3.0+)
-- 이미 TV에 [TizenBrew](https://github.com/reisxd/TizenBrew)가 설치되어 있어야 한다
-
-### 모듈 등록
-TizenBrew Installer 또는 TizenBrew UI의 **Add Module** 항목에서 아래 식별자를 입력:
-
+```sh
+./deploy          # 최초 백엔드 변경 반영, NAS sudo 인증 필요
+./deploy --web    # 실제 UI 배포, sudo·서버 재시작 불필요
 ```
+
+기존 TV 모듈 등록 이름은 같습니다.
+
+```text
 gh/qorrhkddn/tvchak-tizen
 ```
 
-내부 동작: TizenBrew는 jsDelivr를 통해 `https://cdn.jsdelivr.net/gh/qorrhkddn/tvchak-tizen/package.json`을 받고, 같은 경로 아래 `app/index.html`을 진입점으로 띄운다.
+실행기는 NAS 서버의 지원 여부를 먼저 검사합니다. 구버전 NAS이거나 연결할 수 없으면 주소 변경·재시도 화면을 표시하며, 실패한 웹을 빈 화면으로 남기지 않습니다.
 
-### 첫 실행
-앱 진입 → 설정 화면에서 NAS 주소 입력 → 저장 → 사용 시작.
+## 이후 화면 수정
 
-설정값은 TV의 localStorage에 저장된다.
+`app/`만 수정한 뒤 백엔드 저장소에서:
 
-## 리모컨 매핑
-
-| 키 | 동작 |
-|---|---|
-| 방향키 | 포커스 이동 (플레이어에서는 ◀▶가 10초 시킹) |
-| OK | 선택 / 플레이어에서 재생·정지 |
-| Return | 이전 화면 |
-| ▶ / ⏸ / ⏯ | 플레이어 토글 |
-| ⏹ | 플레이어 종료 |
-| 빨강 | 설정·검색에서 백스페이스 |
-| 노랑 | 검색에서 공백, 설정에서 슬래시 |
-| 파랑 | 설정에서 콜론(`:`) |
-| 초록 | 설정에서 저장 / 검색에서 검색 실행 |
-
-## 캐시 새로고침
-
-jsDelivr는 같은 경로를 캐싱한다. 코드 수정 후 TV에서 강제 갱신하려면
-git 태그 또는 commit SHA로 명시:
-
-```
-gh/qorrhkddn/tvchak-tizen@<sha>
+```sh
+./deploy --web
 ```
 
-또는 TizenBrew에서 모듈 제거 후 재등록.
+이제 **TV 앱 버전 변경·태그 생성·CDN purge는 필요 없습니다.** NAS의 자산 버전이 바뀌어 새로 연 화면은 최신 JavaScript·CSS를 받습니다. UI의 `APP_VERSION`은 실행기의 `package.json.version`과 독립적입니다.
+
+이미 열어 둔 화면은 설정의 **웹 화면 다시 불러오기**를 누르거나 앱을 완전히 재실행하세요. TV 홈 버튼으로 백그라운드에 보냈다가 복귀하면 기존 화면이 메모리에 남아 있을 수 있습니다. 화면 내 파랑 키·최신화 메뉴는 목록 데이터를 갱신하는 기능입니다.
+
+`./deploy --web`은 앱 자산만 교체하고 이전 웹을 백업합니다. 프로필·이어보기·즐겨찾기·쿠키는 변경하지 않습니다. `WEB_SOURCE_DIR` 환경 변수로 다른 `app/` 경로를 지정할 수 있습니다.
+
+## iOS
+
+Safari에서 NAS의 `http://ramel.local:7777/web/`을 열고 **공유 → 홈 화면에 추가**를 선택하세요. 별도 iOS 앱 업데이트 없이 같은 NAS UI를 사용합니다. NAS 접속이 되는 네트워크가 필요하며, 집 밖에서는 VPN 등 별도의 접속 경로가 필요합니다.
+
+현재 LAN HTTP 구성은 service worker 오프라인 설치를 사용하지 않습니다. NAS가 꺼져 있으면 웹을 사용할 수 없습니다.
+
+## 설정·시청 기록
+
+- 시청 기록과 즐겨찾기는 기존과 같이 NAS의 프로필별 저장소를 사용합니다.
+- TV 실행기 주소는 실행기 쪽 `localStorage`에 남습니다.
+- NAS 웹의 정렬·화면 맞춤·캐시 시간·프로필 설정은 NAS origin에 저장합니다.
+- 첫 연결 시 NAS origin에 없는 설정만 기존 TV 설정에서 가져옵니다. NAS에 이미 저장된 설정은 덮어쓰지 않습니다.
+- 설정 변경은 실행기에도 알려 다음 NAS 주소 연결에 활용합니다. 기록 전체나 쿠키는 메시지로 전달하지 않습니다.
+
+부모·자식 창의 origin, 메시지 송신 창, 연결별 채널, 허용된 키·설정 이름을 검사합니다. 임의 JavaScript 실행이나 범용 Tizen API 호출을 제공하지 않습니다.
+
+## 리모컨
+
+- 방향키 / OK: 기존 화면 이동·선택
+- Return: 재생 → 상세 → 목록. 목록의 상단 탭에서는 플랫폼 기본 동작
+- 재생·정지·앞뒤 탐색·색상 키: 기존 동작 유지
+- 상세 숫자 키: 원본 이름에 회차가 명시된 항목만 선택
+
+실행기가 Tizen 네이티브 문서를 유지하고 NAS 화면은 iframe에서 실행됩니다. `autoplay`·`fullscreen`을 허용하며, 최상위로 전달되는 키는 NAS에 중계합니다. 실제 TV 모델의 iframe 재생·키 동작은 최초 전환 후 확인이 필요합니다.
+
+## 테스트
+
+```sh
+node --test tests/*.test.js
+```
+
+백엔드 웹 모드·배포 테스트는 tvchak-py의 테스트를 실행합니다.
 
 ## 라이선스
 

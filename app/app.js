@@ -9,7 +9,7 @@
 
   // 현재 빌드 버전 — package.json과 동기화. 화면에도 표시되어 TV에 어떤
   // 모듈이 들어왔는지 한눈에 확인 가능.
-  var APP_VERSION = "1.0.38";
+  var APP_VERSION = "1.0.39";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -1406,7 +1406,7 @@
       var width = name.clientWidth;
       var size = parseFloat(window.getComputedStyle(name).fontSize);
       if (!width || name.scrollWidth <= width) return null;
-      return Math.max(Math.min(14, size), Math.floor(size * (width - 1) / name.scrollWidth));
+      return Math.max(1, Math.floor(size * (width - 1) / name.scrollWidth));
     });
     names.forEach(function (name, i) {
       if (sizes[i]) name.style.fontSize = sizes[i] + "px";

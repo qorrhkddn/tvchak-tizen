@@ -162,7 +162,7 @@ test("재생 시작 기록은 기존 등록 시각을 유지하고 새 항목에
   assert.equal(ctx.STORE.get("history")[0].addedAt, 1000);
 });
 
-test("회차 글꼴은 폭에 맞춰 축소하되 최소 크기와 줄바꿈을 보장한다", () => {
+test("회차 글꼴은 한 줄 폭에 맞춰 14px 아래로도 축소하고 넓어지면 복원한다", () => {
   const names = [
     { style: {}, clientWidth: 63, scrollWidth: 77 },
     { style: {}, clientWidth: 63, scrollWidth: 600 },
@@ -175,13 +175,21 @@ test("회차 글꼴은 폭에 맞춰 축소하되 최소 크기와 줄바꿈을 
   });
   ctx.fitEpisodeNames();
   assert.equal(names[0].style.fontSize, "16px");
-  assert.equal(names[1].style.fontSize, "14px");
+  assert.equal(names[1].style.fontSize, "2px");
   assert.equal(names[2].style.fontSize, "");
   assert.equal(names[3].style.fontSize, "");
   assert.ok(names.every(name => name.style.whiteSpace === ""));
   names[0].clientWidth = 200;
   ctx.fitEpisodeNames();
   assert.equal(names[0].style.fontSize, "");
+});
+
+test("회차 이름 스타일은 줄바꿈이나 말줄임 없이 한 줄로 고정한다", () => {
+  const css = fs.readFileSync(path.join(__dirname, "../app/style.css"), "utf8");
+  const rule = css.match(/\.ep-card \.ep-name\s*\{([^}]*)\}/);
+  assert.ok(rule);
+  assert.match(rule[1], /white-space:\s*nowrap/);
+  assert.doesNotMatch(rule[1], /ellipsis|overflow-wrap|word-break/);
 });
 
 function episodeRenderer() {

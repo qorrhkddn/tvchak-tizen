@@ -18,7 +18,7 @@ function load(names, overrides = {}) {
     document: { querySelectorAll: () => [], getElementById: () => ({ textContent: "" }) },
     resolveNasUrl: value => value,
     stripNasPrefix: value => value,
-    toast: () => {},
+    toast: () => {}, isCookieOverlayVisible: () => false,
     ...overrides,
   };
   vm.createContext(context);
@@ -160,6 +160,46 @@ test("재생 시작 기록은 기존 등록 시각을 유지하고 새 항목에
   ctx.STORE.set("history", []);
   ctx.playEpisode({ play_url: "/ep", name: "회차" });
   assert.equal(ctx.STORE.get("history")[0].addedAt, 1000);
+});
+
+test("재생 화면을 떠난 뒤 도착한 추출 응답이나 오류는 화면을 다시 바꾸지 않는다", async () => {
+  for (const failure of [false, true]) {
+    let finish, reject, sourceChanges = 0, back = 0;
+    const classList = { add: () => {}, remove: () => {} };
+    const ctx = playback({
+      currentScreen: "player",
+      player: { titleEl: {}, loadingEl: { classList }, overlay: { classList } },
+      getPlaybackSource: () => new Promise((done, fail) => { finish = done; reject = fail; }),
+      setVideoSrc: () => sourceChanges++, goBack: () => back++,
+    });
+    ctx.playEpisode({ play_url: "/ep", name: "회차" });
+    ctx.currentScreen = "detail";
+    ctx.player.currentEp = null;
+    if (failure) reject(new Error("늦은 오류"));
+    else finish({ proxy_url: "http://nas.test/proxy?u=video" });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(sourceChanges, 0);
+    assert.equal(back, 0);
+  }
+});
+
+test("재생 시작 전에 직접 닫은 컨트롤은 play 완료 뒤에도 다시 열리지 않는다", async () => {
+  let playReady, reveals = 0;
+  const classList = { add: () => {}, remove: () => {} };
+  const ctx = playback({
+    currentScreen: "player",
+    player: { titleEl: {}, loadingEl: { classList }, overlay: { classList },
+      video: { play: () => new Promise(resolve => { playReady = resolve; }) } },
+    getPlaybackSource: async () => ({ proxy_url: "http://nas.test/proxy?u=video" }),
+    setVideoSrc: () => {}, schedulePersist: () => {}, showOverlayBriefly: () => reveals++,
+  });
+  ctx.playEpisode({ play_url: "/ep", name: "회차" });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(typeof playReady, "function");
+  ctx.player.overlayDismissed = true;
+  playReady();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(reveals, 0);
 });
 
 test("회차 글꼴은 한 줄 폭에 맞춰 14px 아래로도 축소하고 넓어지면 복원한다", () => {

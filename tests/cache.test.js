@@ -22,6 +22,7 @@ function load(names, overrides = {}) {
   const context = {
     API_CACHE_PREFIX: prefix, API_TIMEOUT_MS: 500,
     cacheMenuId: null, closeCacheMenu: () => false,
+    closeCookieOverlay: () => false, isCookieOverlayVisible: () => false,
     screens: { home: {} }, currentScreen: "home", rebuildFocus: () => {},
     localStorage: { getItem: key => storage.get(key) || null, setItem: (key, value) => storage.set(key, value) },
     getCacheTtlMs: () => 86400000,

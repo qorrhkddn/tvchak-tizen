@@ -8,7 +8,7 @@
   "use strict";
 
   // NAS에서 제공되는 웹 UI 버전. TV 실행기의 package.json 버전과 독립적.
-  var APP_VERSION = "1.1.2";
+  var APP_VERSION = "1.1.3";
 
   // ---------- API 응답 캐시 (localStorage) ----------
   // Cloudflare 차단 회피를 위해 응답을 길게 캐시한다. 기본 24시간. 사용자는
@@ -636,6 +636,11 @@
   }
 
   function rebuildFocus(container, preferredEl) {
+    var cookieOverlay = document.getElementById("cookie-refresh-overlay");
+    if (isCookieOverlayVisible() && container !== cookieOverlay) {
+      container = cookieOverlay;
+      preferredEl = document.getElementById("cr-close");
+    }
     focus.items = [];
     focus.rowMap = {};
     var nodes = container.querySelectorAll(".focusable");
@@ -906,9 +911,46 @@
   // ---------- cf_clearance FAB + 전체 화면 오버레이 (모든 screen 공통) ----------
   var _autoRefreshInFlight = false;
   var _lastAutoRefreshTs = 0;
+  var _cookieOverlayDismissed = false;
+  var _cookieOverlayReturnFocus = null;
+
+  function isCookieOverlayVisible() {
+    var overlay = document.getElementById("cookie-refresh-overlay");
+    return !!overlay && !overlay.classList.contains("hidden");
+  }
+
+  function openCookieOverlay() {
+    var overlay = document.getElementById("cookie-refresh-overlay");
+    if (!overlay) return;
+    if (!isCookieOverlayVisible()) _cookieOverlayReturnFocus = focus.current;
+    closeCacheMenu(false);
+    _cookieOverlayDismissed = false;
+    overlay.classList.remove("hidden");
+    var active = document.activeElement;
+    if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA")) active.blur();
+    rebuildFocus(overlay, document.getElementById("cr-close"));
+  }
+
+  function closeCookieOverlay() {
+    var overlay = document.getElementById("cookie-refresh-overlay");
+    if (!overlay || !isCookieOverlayVisible()) return false;
+    _cookieOverlayDismissed = true;
+    overlay.classList.add("hidden");
+    if (focus.current && overlay.contains(focus.current)) {
+      focus.current.classList.remove("focused");
+      focus.current = null;
+    }
+    if (currentScreen === "player") hidePlayerOverlay();
+    else if (currentScreen && screens[currentScreen]) {
+      var previous = _cookieOverlayReturnFocus;
+      var preferred = previous && screens[currentScreen].contains(previous) ? previous : null;
+      rebuildFocus(screens[currentScreen], preferred);
+    }
+    return true;
+  }
 
   function triggerCookieRefresh() {
-    if (_autoRefreshInFlight) return;  // 중복 트리거 방지
+    if (_autoRefreshInFlight) { openCookieOverlay(); return; }
     _autoRefreshInFlight = true;
     var ov = document.getElementById("cookie-refresh-overlay");
     var icon = document.getElementById("cr-icon");
@@ -926,9 +968,10 @@
     title.style.color = "";
     detail.innerHTML =
       "NAS 안 flaresolverr 가 Chrome 띄워 Cloudflare 챌린지 통과 중…<br>" +
-      "<strong>약 1분 이내 완료</strong>. 창을 닫지 마세요.";
+      "<strong>약 1분 이내 완료</strong>. 닫아도 갱신은 계속됩니다.";
     actions.classList.add("hidden");
-    ov.classList.remove("hidden");
+    closeBtn.textContent = "닫기 ×";
+    openCookieOverlay();
 
     var startTs = Date.now();
     fetch(nasUrl().replace(/\/$/, "") + "/api/cookie/refresh", {
@@ -946,7 +989,7 @@
           '<span style="color:var(--danger)">' + (res.body.error || ("HTTP " + res.status)) + "</span>" +
           '<br><span style="color:var(--muted);font-size:14px;">경과 ' + elapsed + "s</span>";
         confirmBtn.style.display = "none";
-        closeBtn.textContent = "닫기";
+        closeBtn.textContent = "닫기 ×";
       } else {
         var names = (res.body.cookie_names || []).join(", ");
         icon.textContent = "✓";
@@ -958,12 +1001,12 @@
           '<code>' + names + "</code><br>" +
           '<span style="color:var(--muted);font-size:14px;">경과 ' + elapsed + "s</span>";
         confirmBtn.style.display = "";
-        closeBtn.textContent = "그냥 닫기";
+        closeBtn.textContent = "닫기 ×";
       }
       actions.classList.remove("hidden");
       // TV 리모컨: 결과 버튼에 자동 포커스. 성공 시 confirm, 실패면 close.
       var preferred = (confirmBtn.style.display === "none") ? closeBtn : confirmBtn;
-      rebuildFocus(ov, preferred);
+      if (!_cookieOverlayDismissed && isCookieOverlayVisible()) rebuildFocus(ov, preferred);
     })
     .catch(function (e) {
       icon.textContent = "✗";
@@ -972,9 +1015,9 @@
       title.style.color = "var(--danger)";
       detail.innerHTML = '<span style="color:var(--danger)">' + e.message + "</span>";
       confirmBtn.style.display = "none";
-      closeBtn.textContent = "닫기";
+      closeBtn.textContent = "닫기 ×";
       actions.classList.remove("hidden");
-      rebuildFocus(ov, closeBtn);
+      if (!_cookieOverlayDismissed && isCookieOverlayVisible()) rebuildFocus(ov, closeBtn);
     })
     .then(function () {
       _autoRefreshInFlight = false;
@@ -982,13 +1025,6 @@
     });
 
     confirmBtn.onclick = function () { location.reload(); };
-    closeBtn.onclick = function () {
-      ov.classList.add("hidden");
-      // 오버레이 닫히면 원래 screen 의 포커스 복원
-      if (currentScreen && screens[currentScreen]) {
-        rebuildFocus(screens[currentScreen]);
-      }
-    };
   }
   window.triggerCookieRefresh = triggerCookieRefresh;
 
@@ -1548,6 +1584,8 @@
     video: document.getElementById("video"),
     overlay: document.getElementById("player-overlay"),
     overlayTimer: null,
+    controlsFocused: false,
+    overlayDismissed: false,
     progressBar: document.getElementById("player-progress-bar"),
     curEl: document.getElementById("player-cur"),
     durEl: document.getElementById("player-dur"),
@@ -1696,6 +1734,10 @@
     player.titleEl.textContent =
       (detailState.info ? detailState.info.title : "") + " · " + (ep.name || "");
     player.loadingEl.classList.remove("hidden");
+    if (player.overlayTimer) clearTimeout(player.overlayTimer);
+    player.overlayTimer = null;
+    player.controlsFocused = false;
+    player.overlayDismissed = false;
     player.overlay.classList.remove("hidden");
     applyFitMode();
 
@@ -1703,6 +1745,7 @@
     rememberEpisode(ep);
 
     getPlaybackSource(ep.play_url, bypass).then(function (j) {
+      if (currentScreen !== "player" || player.currentEp !== ep) return;
       if (j.error) throw new Error(j.error);
       // 1차: NAS proxy 경유 — 대부분의 호스트(wiselife.blog, BunnyCDN 등)는
       // proxy 의 referer 박힘이 anti-hotlink 통과에 필요. 실패하는 일부 케이스
@@ -1736,9 +1779,16 @@
       }
 
       player.currentEp = ep;
-      player.video.play().catch(function (e) { console.warn("play() 실패", e); });
+      var playing = player.video.play();
+      var reveal = function () {
+        if (currentScreen === "player" && player.currentEp === ep && !player.overlayDismissed) showOverlayBriefly();
+      };
+      if (playing && typeof playing.then === "function") {
+        playing.then(reveal).catch(function (e) { console.warn("play() 실패", e); });
+      } else reveal();
       schedulePersist();
     }).catch(function (e) {
+      if (currentScreen !== "player" || player.currentEp !== ep) return;
       toast("스트림 추출 실패: " + e.message, "danger");
       goBack();
     });
@@ -1777,6 +1827,7 @@
   }
 
   function stopPlayback() {
+    hidePlayerOverlay();
     if (player.saveTimer) { clearInterval(player.saveTimer); player.saveTimer = null; }
     persistHistory();
     if (player._resumeListener) {
@@ -1924,12 +1975,40 @@
     STORE.set(KEYS.HISTORY, history);
   }
 
+  function playerOverlayEnabled() {
+    return !(typeof window !== "undefined" && window.TVCHAK_WEB && window.TVCHAK_WEB.mode === "web");
+  }
+
+  function isPlayerOverlayVisible() {
+    if (!playerOverlayEnabled() || player.overlay.classList.contains("hidden")) return false;
+    return !(typeof window !== "undefined" && window.getComputedStyle
+      && window.getComputedStyle(player.overlay).display === "none");
+  }
+
+  function hidePlayerOverlay() {
+    if (player.overlayTimer) clearTimeout(player.overlayTimer);
+    player.overlayTimer = null;
+    player.controlsFocused = false;
+    player.overlayDismissed = true;
+    player.overlay.classList.add("hidden");
+    if (focus.current && player.overlay.contains(focus.current)) {
+      focus.current.classList.remove("focused");
+      focus.current = null;
+    }
+  }
+
   function showOverlayBriefly() {
+    player.overlayDismissed = false;
     player.overlay.classList.remove("hidden");
     if (player.overlayTimer) clearTimeout(player.overlayTimer);
-    player.overlayTimer = setTimeout(function () {
-      player.overlay.classList.add("hidden");
-    }, 4000);
+    player.overlayTimer = null;
+    if (!player.controlsFocused) player.overlayTimer = setTimeout(hidePlayerOverlay, 4000);
+  }
+
+  function focusPlayerControls() {
+    player.controlsFocused = true;
+    showOverlayBriefly();
+    rebuildFocus(player.overlay, document.getElementById("player-overlay-close"));
   }
 
   player.video.addEventListener("timeupdate", function () {
@@ -2160,6 +2239,9 @@
     if (action === "refresh-domain") return refreshSeedDomain();
     if (action === "refresh-cookie") return refreshCookie();
     if (action === "refresh-cookie-fab") return triggerCookieRefresh();
+    if (action === "player-overlay-close") return hidePlayerOverlay();
+    if (action === "cookie-overlay-close") return closeCookieOverlay();
+    if (action === "cache-menu-close") return closeCacheMenu(true);
     if (action === "refresh") return refreshCurrent();
     if (action === "list-cache-toggle") return toggleCacheMenu("list-cache");
     if (action === "detail-cache-toggle") return toggleCacheMenu("detail-cache");
@@ -2385,6 +2467,7 @@
   });
 
   function handleNumberKey(num) {
+    if (isCookieOverlayVisible()) return true;
     if (currentScreen === "home") {
       var tabMap = {
         1: "cat-1", 2: "cat-2", 3: "cat-3", 4: "cat-4",
@@ -2418,7 +2501,10 @@
   }
 
   function onArrow(dx, dy) {
+    if (isCookieOverlayVisible()) { move(dx, dy); return; }
     if (currentScreen === "player") {
+      if (playerOverlayEnabled() && player.controlsFocused) { move(dx, dy); return; }
+      if (dy && playerOverlayEnabled()) { focusPlayerControls(); return; }
       if (dx) { onSeek(dx > 0 ? 10 : -10); showOverlayBriefly(); }
       else { showOverlayBriefly(); }
       return;
@@ -2427,14 +2513,17 @@
   }
 
   function onOk() {
-    if (currentScreen === "player") { onPlayPause(); return; }
+    if (isCookieOverlayVisible()) { clickFocusable(); return; }
+    if (currentScreen === "player" && !player.controlsFocused) { onPlayPause(); return; }
     clickFocusable();
   }
 
   // 반환값: true면 우리가 처리했으니 default 동작(앱 종료/TizenBrew 복귀) 차단,
   //        false면 default 흘려보내서 TizenBrew 메인 메뉴로 나가게 한다.
   function onBack() {
+    if (closeCookieOverlay()) return true;
     if (closeCacheMenu(true)) return true;
+    if (currentScreen === "player" && isPlayerOverlayVisible()) { hidePlayerOverlay(); return true; }
     // NAS 주소 미설정 상태에선 설정에 머물게 함
     if (currentScreen === "settings" && !nasUrl()) { return true; }
 
@@ -2494,6 +2583,7 @@
   }
 
   function onColor(color) {
+    if (isCookieOverlayVisible()) return;
     if (currentScreen === "player") {
       if (color === "blue") cycleFitMode();
       if (color === "green") swapPlayerSrc();  // proxy ↔ 직접 URL 토글
@@ -2652,7 +2742,7 @@
     var current = focus.current && focus.items.find(function (item) { return item.el === focus.current; });
     return {
       screen: currentScreen || "loading",
-      canHandleBack: currentScreen !== "home" || !!cacheMenuId || !!(current && current.row > 0),
+      canHandleBack: isCookieOverlayVisible() || currentScreen !== "home" || !!cacheMenuId || !!(current && current.row > 0),
     };
   }
 

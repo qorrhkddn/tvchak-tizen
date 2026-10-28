@@ -64,7 +64,8 @@ html, body {
   background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
 }
-.cache-status { font-size: 13px; line-height: 1.5; margin-bottom: 10px; color: var(--muted); }
+.cache-status { font-size: 13px; line-height: 1.5; margin-bottom: 10px; padding-right: 28px; color: var(--muted); }
+.cache-menu .cache-menu-close { position: absolute; top: 6px; right: 6px; padding: 2px 6px; min-width: 24px; }
 .cache-badge { background: var(--accent); border-color: var(--accent); color: #fff; }
 
 .hint { color: var(--muted); font-size: 18px; margin: 8px 0 16px; }
@@ -181,7 +182,10 @@ html, body {
   transition: opacity 0.25s; pointer-events: none;
 }
 .player-overlay.hidden { opacity: 0; }
-.player-title { font-size: 28px; margin-bottom: 12px; }
+.player-overlay .btn { pointer-events: auto; }
+.player-overlay-heading { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 12px; }
+.player-title { font-size: 28px; flex: 1; min-width: 0; }
+.overlay-close { padding: 6px 12px; font-size: 16px; flex-shrink: 0; }
 .player-progress { height: 8px; background: rgba(255,255,255,0.18); border-radius: 4px; overflow: hidden; }
 .player-progress-bar { height: 100%; background: var(--accent); width: 0; }
 .player-time { margin-top: 8px; font-size: 20px; color: var(--muted); }
@@ -223,11 +227,12 @@ html, body {
 }
 #cookie-refresh-overlay.hidden { display: none; }
 .cr-box {
-  background: var(--panel, #1a1d24); border: 1px solid var(--border);
-  border-radius: 16px; padding: 32px 28px;
-  width: min(520px, 92vw); text-align: center;
+  position: relative; background: var(--panel, #1a1d24); border: 1px solid var(--border);
+  border-radius: 16px; padding: 44px 28px 32px;
+  width: 520px; max-width: 92vw; text-align: center;
   box-shadow: 0 10px 40px rgba(0,0,0,0.6);
 }
+.cr-box .cr-close { position: absolute; top: 12px; right: 12px; padding: 6px 12px; font-size: 16px; }
 .cr-icon { font-size: 64px; line-height: 1; margin-bottom: 18px; }
 .cr-spinner {
   width: 60px; height: 60px; margin: 0 auto;

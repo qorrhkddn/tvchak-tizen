@@ -97,6 +97,8 @@
             <button id="list-cache-toggle" class="cache-toggle focusable" data-action="list-cache-toggle"
                     data-row="0" data-col="7" aria-expanded="false" aria-controls="list-cache-menu">캐시 ▾</button>
             <div id="list-cache-menu" class="cache-menu hidden">
+              <button type="button" class="nav-icon focusable cache-menu-close" data-action="cache-menu-close"
+                      data-row="1" data-col="8" aria-label="캐시 메뉴 닫기">×</button>
               <div id="list-cache-status" class="cache-status" aria-live="polite"></div>
               <button id="list-cache" class="cache-badge focusable" data-action="refresh-cache"
                       data-row="1" data-col="7">최신화 ↻</button>
@@ -145,6 +147,8 @@
             <button id="detail-cache-toggle" class="cache-toggle focusable" data-action="detail-cache-toggle"
                     data-row="0" data-col="1" aria-expanded="false" aria-controls="detail-cache-menu">캐시 ▾</button>
             <div id="detail-cache-menu" class="cache-menu hidden">
+              <button type="button" class="nav-icon focusable cache-menu-close" data-action="cache-menu-close"
+                      data-row="1" data-col="3" aria-label="캐시 메뉴 닫기">×</button>
               <div id="detail-cache-status" class="cache-status" aria-live="polite"></div>
               <button id="detail-cache" class="cache-badge focusable" data-action="refresh-cache"
                       data-row="1" data-col="2">최신화 ↻</button>
@@ -174,7 +178,12 @@
              playsinline webkit-playsinline x5-playsinline
              autopictureinpicture></video>
       <div id="player-overlay" class="player-overlay">
-        <div class="player-title" id="player-title"></div>
+        <div class="player-overlay-heading">
+          <div class="player-title" id="player-title"></div>
+          <button type="button" id="player-overlay-close" class="btn btn-secondary focusable overlay-close"
+                  data-action="player-overlay-close" data-row="0" data-col="0"
+                  aria-label="재생 컨트롤 닫기">닫기 ×</button>
+        </div>
         <div class="player-progress">
           <div class="player-progress-bar" id="player-progress-bar"></div>
         </div>
@@ -182,12 +191,12 @@
           <span id="player-cur">00:00</span> / <span id="player-dur">00:00</span>
           <span style="margin-left: 18px;" id="player-fit-info">화면: 맞춤</span>
         </div>
-        <div class="player-hint">▶/⏸ 재생/정지 · ◀▶ 10초 시킹 · OK 오버레이 · 파랑 키 화면맞춤 · 빨강 키 스트림 다시 받기 · 초록 키 다른 경로(NAS proxy ↔ 직접) · Return 종료</div>
+        <div class="player-hint">◀▶ 10초 이동 · OK 재생/정지 · ↑↓ 버튼 선택 후 OK 실행 · 복귀: 컨트롤 닫기 / 한 번 더 재생 종료 · 파랑: 화면맞춤 · 빨강: 스트림 다시 받기 · 초록: 경로 변경</div>
         <div style="margin-top: 10px;">
-          <button class="btn btn-secondary focusable" data-action="swap-src" id="swap-src-btn">
+          <button class="btn btn-secondary focusable" data-action="swap-src" id="swap-src-btn" data-row="1" data-col="0">
             🔁 다른 경로로 다시 시도
           </button>
-          <button class="btn btn-secondary focusable" data-action="pip" id="pip-btn"
+          <button class="btn btn-secondary focusable" data-action="pip" id="pip-btn" data-row="1" data-col="1"
                   title="작은 창으로 빼서 다른 작업 위에 띄움 (iOS Safari / macOS Safari)">
             🪟 작은 창 (PiP)
           </button>
@@ -209,17 +218,19 @@
     <!-- 전체 화면 오버레이 (진행 중 / 결과) -->
     <div id="cookie-refresh-overlay" class="hidden">
       <div class="cr-box">
+        <button type="button" id="cr-close" class="btn btn-secondary focusable cr-close"
+                data-action="cookie-overlay-close" data-row="0" data-col="0"
+                aria-label="쿠키 갱신 창 닫기">닫기 ×</button>
         <div id="cr-icon" class="cr-icon">
           <div class="cr-spinner"></div>
         </div>
         <div id="cr-title" class="cr-title">쿠키 갱신 중</div>
         <div id="cr-detail" class="cr-detail">
           NAS 안 flaresolverr 가 Chrome 띄워 Cloudflare 챌린지 통과 중…<br>
-          <strong>약 1분 이내 완료</strong>. 창을 닫지 마세요.
+          <strong>약 1분 이내 완료</strong>. 닫아도 갱신은 계속됩니다.
         </div>
         <div id="cr-actions" class="cr-actions hidden">
-          <button type="button" id="cr-confirm" class="btn focusable" data-row="0" data-col="0">확인 &amp; 새로고침</button>
-          <button type="button" id="cr-close" class="btn btn-secondary focusable" data-row="0" data-col="1">그냥 닫기</button>
+          <button type="button" id="cr-confirm" class="btn focusable" data-row="1" data-col="0">확인 &amp; 새로고침</button>
         </div>
       </div>
     </div>
